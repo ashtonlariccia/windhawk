@@ -70,12 +70,33 @@ setting, no recompile:
 
 | Constant | Default | Controls |
 |---|---|---|
-| `RowShiftY` | `0` | **vertical position of avatar + power.** If they sit too high or too low, change only this |
-| `RowHeight` | `48` | height of the row hosting them |
-| `IconSize` | `32` | avatar and power button size |
+| `RowShiftY` | `0` | vertical position of avatar + power |
+| `SearchShiftY` | `6` | **vertical position of the search box.** Positive = down |
+| `RowHeight` | `48` | height of the row hosting avatar + power |
+| `IconSize` | `32` | hit area of avatar and power button |
+| `AvatarSize` | `28` | the avatar image itself |
 | `UserTileMargin` | `16,0,0,0` | avatar distance from the left edge |
 | `PowerMargin` | `0,0,16,0` | power button distance from the right edge |
 | `SearchInset` | `72,-2,72,2` | search box margins, i.e. the gap left for both controls |
+| `FlyoutBackground` | `SystemChromeMediumColor` | power menu background |
+| `FlyoutBorderBrush` | `SurfaceStrokeColorDefault` | power menu border |
+
+### Three fixes applied after first render
+
+**Power menu opened transparent.** OnlySearch (Minimal) collapses
+`Border#AcrylicOverlay` *unscoped* — so it also strips the background from
+popups containing an element of that name. Re-scoping that rule is what makes
+the bar itself look right, so instead the flyout is painted back explicitly on
+`MenuFlyoutPresenter` / `FlyoutPresenter`, the same approach the Everblush theme
+uses.
+
+**Avatar was cut in half.** `StartDocked.UserTileView` had both `Width` and
+`Height` forced to `IconSize`, which clips the inner image. The Windows10 themes
+size the inner `Grid#UserTileIcon` instead and leave the view's width automatic
+— that is what this now does, via `AvatarSize`.
+
+**Search box sat higher than the other two.** Nudged with a `RenderTransform`
+rather than a margin, so it stays layout-neutral and cannot re-expand the bar.
 
 Negative values are fine and expected -- the official styling guide relocates
 the power button with `Margin=-580,-1330,0,0`.

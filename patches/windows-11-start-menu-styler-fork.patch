@@ -1,5 +1,5 @@
 diff --git a/upstream/windows-11-start-menu-styler@1.7.wh.cpp b/mods/windows-11-start-menu-styler-fork.wh.cpp
-index e9cc96f..549e86c 100644
+index e9cc96f..33b79ee 100644
 --- a/upstream/windows-11-start-menu-styler@1.7.wh.cpp
 +++ b/mods/windows-11-start-menu-styler-fork.wh.cpp
 @@ -1,6 +1,6 @@
@@ -27,7 +27,7 @@ index e9cc96f..549e86c 100644
  - disableNewStartMenuLayout: ""
    $name: Start menu layout
    $description: >-
-@@ -4452,6 +4454,109 @@ const Theme g_themeOnlySearch_variant_Minimal = {{
+@@ -4452,6 +4454,145 @@ const Theme g_themeOnlySearch_variant_Minimal = {{
          L"Margin=0,-2,0,2"}},
  }};
  
@@ -91,14 +91,25 @@ index e9cc96f..549e86c 100644
 +        L"HorizontalAlignment=Left",
 +        L"VerticalAlignment=Center",
 +        L"Height=$IconSize",
-+        L"Width=$IconSize",
++        L"Width=Auto",
++        L"MinWidth=$IconSize",
 +        L"MaxWidth=Auto",
 +        L"Margin=$UserTileMargin"}},
 +    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#UserTileButton", {
 +        L"Visibility=0",
 +        L"Height=$IconSize",
 +        L"Width=$IconSize",
-+        L"VerticalAlignment=Center"}},
++        L"Padding=0,0,0,0",
++        L"VerticalAlignment=Center",
++        L"HorizontalAlignment=Center"}},
++    // The avatar itself. Sizing this rather than the view is what keeps it
++    // circular instead of clipped -- same approach the Windows10 themes use.
++    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#UserTileIcon", {
++        L"Width=$AvatarSize",
++        L"Height=$AvatarSize",
++        L"Margin=0,0,0,0",
++        L"VerticalAlignment=Center",
++        L"HorizontalAlignment=Center"}},
 +    ThemeTargetStyles{L"TextBlock#UserTileNameText", {
 +        L"Visibility=Collapsed"}},
 +
@@ -117,27 +128,52 @@ index e9cc96f..549e86c 100644
 +        L"Width=$IconSize",
 +        L"VerticalAlignment=Center"}},
 +
++    // ---- power menu must keep a real background ----
++    ThemeTargetStyles{L"MenuFlyoutPresenter", {
++        L"Background:=$FlyoutBackground",
++        L"BorderBrush:=$FlyoutBorderBrush",
++        L"BorderThickness=1",
++        L"CornerRadius=8"}},
++    ThemeTargetStyles{L"MenuFlyoutPresenter > Border", {
++        L"Background:=$FlyoutBackground",
++        L"CornerRadius=8"}},
++    ThemeTargetStyles{L"FlyoutPresenter", {
++        L"Background:=$FlyoutBackground",
++        L"BorderBrush:=$FlyoutBorderBrush",
++        L"BorderThickness=1",
++        L"CornerRadius=8"}},
++
 +    // ---- make room in the middle for both ----
 +    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
-+        L"Margin=$SearchInset"}},
++        L"Margin=$SearchInset",
++        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
 +    ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton", {
-+        L"Margin=$SearchInset"}},
++        L"Margin=$SearchInset",
++        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
 +}, {
 +    // Tune these from the mod's "Style constants" setting -- no recompile.
 +    // If the avatar/power sit too high or too low, change RowShiftY only.
 +    L"RowShiftY=0",
 +    L"RowHeight=48",
 +    L"IconSize=32",
++    L"AvatarSize=28",
 +    L"UserTileMargin=16,0,0,0",
 +    L"PowerMargin=0,0,16,0",
 +    L"SearchInset=72,-2,72,2",
++    // Positive moves the search box DOWN. Raise this if the search box still
++    // sits higher than the avatar and power button.
++    L"SearchShiftY=6",
++    // Power menu background. Swap the ThemeResource for a hex colour
++    // (e.g. #202020) if you want it opaque and fixed rather than theme-aware.
++    L"FlyoutBackground=<SolidColorBrush Color=\"{ThemeResource SystemChromeMediumColor}\" />",
++    L"FlyoutBorderBrush=<SolidColorBrush Color=\"{ThemeResource SurfaceStrokeColorDefault}\" />",
 +}};
 +
 +
  const Theme g_themeWindowGlass = {{
      ThemeTargetStyles{L"StackPanel#TimeAndDatePanel", {
          L"VerticalAlignment=Top",
-@@ -7559,6 +7664,372 @@ const Theme g_themeFrostyGlass = {{
+@@ -7559,6 +7700,372 @@ const Theme g_themeFrostyGlass = {{
          L"min-width: 325px !important"}},
  }};
  
@@ -510,7 +546,7 @@ index e9cc96f..549e86c 100644
  // clang-format on
  
  std::atomic<DWORD> g_targetThreadId = 0;
-@@ -15239,6 +15710,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
+@@ -15239,6 +15746,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
                      : &g_themeOnlySearch_variant_ClassicStartMenu;
      } else if (wcscmp(themeName, L"OnlySearch_variant_Minimal") == 0) {
          theme = &g_themeOnlySearch_variant_Minimal;
@@ -519,7 +555,7 @@ index e9cc96f..549e86c 100644
      } else if (wcscmp(themeName, L"WindowGlass") == 0) {
          theme = &g_themeWindowGlass;
      } else if (wcscmp(themeName, L"WindowGlass_variant_Minimal") == 0) {
-@@ -15271,6 +15744,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
+@@ -15271,6 +15780,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
                                      : &g_themeFullScreen_variant_1;
      } else if (wcscmp(themeName, L"FrostyGlass") == 0) {
          theme = &g_themeFrostyGlass;

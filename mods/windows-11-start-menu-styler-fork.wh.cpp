@@ -4514,14 +4514,25 @@ const Theme g_themeOnlySearchUserPower = {{
         L"HorizontalAlignment=Left",
         L"VerticalAlignment=Center",
         L"Height=$IconSize",
-        L"Width=$IconSize",
+        L"Width=Auto",
+        L"MinWidth=$IconSize",
         L"MaxWidth=Auto",
         L"Margin=$UserTileMargin"}},
     ThemeTargetStyles{L"StartDocked.NavigationPaneButton#UserTileButton", {
         L"Visibility=0",
         L"Height=$IconSize",
         L"Width=$IconSize",
-        L"VerticalAlignment=Center"}},
+        L"Padding=0,0,0,0",
+        L"VerticalAlignment=Center",
+        L"HorizontalAlignment=Center"}},
+    // The avatar itself. Sizing this rather than the view is what keeps it
+    // circular instead of clipped -- same approach the Windows10 themes use.
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#UserTileIcon", {
+        L"Width=$AvatarSize",
+        L"Height=$AvatarSize",
+        L"Margin=0,0,0,0",
+        L"VerticalAlignment=Center",
+        L"HorizontalAlignment=Center"}},
     ThemeTargetStyles{L"TextBlock#UserTileNameText", {
         L"Visibility=Collapsed"}},
 
@@ -4540,20 +4551,45 @@ const Theme g_themeOnlySearchUserPower = {{
         L"Width=$IconSize",
         L"VerticalAlignment=Center"}},
 
+    // ---- power menu must keep a real background ----
+    ThemeTargetStyles{L"MenuFlyoutPresenter", {
+        L"Background:=$FlyoutBackground",
+        L"BorderBrush:=$FlyoutBorderBrush",
+        L"BorderThickness=1",
+        L"CornerRadius=8"}},
+    ThemeTargetStyles{L"MenuFlyoutPresenter > Border", {
+        L"Background:=$FlyoutBackground",
+        L"CornerRadius=8"}},
+    ThemeTargetStyles{L"FlyoutPresenter", {
+        L"Background:=$FlyoutBackground",
+        L"BorderBrush:=$FlyoutBorderBrush",
+        L"BorderThickness=1",
+        L"CornerRadius=8"}},
+
     // ---- make room in the middle for both ----
     ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
-        L"Margin=$SearchInset"}},
+        L"Margin=$SearchInset",
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
     ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton", {
-        L"Margin=$SearchInset"}},
+        L"Margin=$SearchInset",
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
 }, {
     // Tune these from the mod's "Style constants" setting -- no recompile.
     // If the avatar/power sit too high or too low, change RowShiftY only.
     L"RowShiftY=0",
     L"RowHeight=48",
     L"IconSize=32",
+    L"AvatarSize=28",
     L"UserTileMargin=16,0,0,0",
     L"PowerMargin=0,0,16,0",
     L"SearchInset=72,-2,72,2",
+    // Positive moves the search box DOWN. Raise this if the search box still
+    // sits higher than the avatar and power button.
+    L"SearchShiftY=6",
+    // Power menu background. Swap the ThemeResource for a hex colour
+    // (e.g. #202020) if you want it opaque and fixed rather than theme-aware.
+    L"FlyoutBackground=<SolidColorBrush Color=\"{ThemeResource SystemChromeMediumColor}\" />",
+    L"FlyoutBorderBrush=<SolidColorBrush Color=\"{ThemeResource SurfaceStrokeColorDefault}\" />",
 }};
 
 
