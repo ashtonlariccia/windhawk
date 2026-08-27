@@ -4542,14 +4542,17 @@ const Theme g_themeOnlySearchUserPower = {{
         L"HorizontalAlignment=Right",
         L"VerticalAlignment=Center",
         L"Height=$IconSize",
-        L"Width=$IconSize",
+        L"Width=Auto",
+        L"MinWidth=$IconSize",
         L"MaxWidth=Auto",
         L"Margin=$PowerMargin"}},
     ThemeTargetStyles{L"StartDocked.NavigationPaneButton#PowerButton", {
         L"Visibility=0",
         L"Height=$IconSize",
         L"Width=$IconSize",
-        L"VerticalAlignment=Center"}},
+        L"Padding=0,0,0,0",
+        L"VerticalAlignment=Center",
+        L"HorizontalAlignment=Center"}},
 
     // ---- power menu must keep a real background ----
     ThemeTargetStyles{L"MenuFlyoutPresenter", {
@@ -4569,6 +4572,7 @@ const Theme g_themeOnlySearchUserPower = {{
     // ---- make room in the middle for both ----
     ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
         L"Margin=$SearchInset",
+        L"Canvas.ZIndex=$SearchZIndex",
         L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
     ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton", {
         L"Margin=$SearchInset",
@@ -4586,6 +4590,9 @@ const Theme g_themeOnlySearchUserPower = {{
     // Positive moves the search box DOWN. Raise this if the search box still
     // sits higher than the avatar and power button.
     L"SearchShiftY=6",
+    // Keeps the search box above anything a dismissed flyout leaves behind.
+    // Set to 0 if it causes the avatar or power button to be overlapped.
+    L"SearchZIndex=10",
     // Power menu background. Swap the ThemeResource for a hex colour
     // (e.g. #202020) if you want it opaque and fixed rather than theme-aware.
     L"FlyoutBackground=<SolidColorBrush Color=\"{ThemeResource SystemChromeMediumColor}\" />",
