@@ -33,6 +33,66 @@ build/      scratch: editor-buffer backups (gitignored)
 |---|---|---|
 | `windows-11-start-menu-styler-lariccia` | `windows-11-start-menu-styler` | 1.7 |
 
+## Custom theme: FrostyGlass Search Line
+
+A merged theme added to the fork. Select **"FrostyGlass Search Line (one-line
+search bar)"** in the mod's Theme setting.
+
+Collapses the Start menu to a single ~60px bar holding, on one row:
+
+```
+[ avatar ]        [        search box        ]        [ power ]
+```
+
+**Taken from FrostyGlass:** all the glass styling (acrylic, gradient borders,
+corner radii), the profile picture (`StartDocked.UserTileView`) and the power
+options (`StartDocked.PowerOptionsView`).
+
+**Taken from OnlySearch (Minimal):** the window size (60px tall) and the
+hide-everything-else rules — pinned list, recommended, all-apps frame, and the
+right-hand companion are all collapsed.
+
+### The one thing that could not be copied verbatim
+
+OnlySearch (Minimal) collapses `StartDocked.NavigationPaneView#NavigationPane`
+outright — and that element is the **parent of both the profile picture and the
+power button**. Taking that rule as-is would have hidden the two things you
+asked to keep.
+
+So this theme deliberately keeps `NavigationPane` visible and instead pins it to
+the bar height, then re-anchors the avatar left and the power button right. The
+`Grid#NavPanePlaceholder` (the empty row the nav pane normally reserves) is
+collapsed so it does not add a second row.
+
+### Tuning without recompiling
+
+Every layout number is a style constant. Override any of them in the mod's
+**Style constants** setting (Windhawk UI) — no rebuild needed:
+
+| Constant | Default | Controls |
+|---|---|---|
+| `BarHeight` | `60` | height of the whole bar |
+| `BarWidth` | `666` | width of the whole bar |
+| `IconSize` | `40` | avatar + power button size |
+| `SearchHeight` | `36` | search box height |
+| `SearchWidth` | `470` | search box width |
+| `UserTileMargin` | `14,0,0,0` | avatar position |
+| `PowerMargin` | `0,0,14,0` | power button position |
+| `NavPaneMargin` | `0,0,0,0` | nudges avatar+power as a pair |
+| `SearchPageMargin` | `0,64,0,0` | where search results appear |
+
+Example — to widen the bar and shrink the search box, add these as two entries
+in Style constants:
+
+```
+BarWidth=760
+SearchWidth=540
+```
+
+Note: the search box keeps FrostyGlass's glass styling rather than the plain
+default one from OnlySearch, since the bar is otherwise FrostyGlass. Width comes
+from FrostyGlass too (OnlySearch Minimal never sets a width, only height).
+
 ## Workflow
 
 **1. Edit** `mods/<forkid>.wh.cpp` in your editor of choice.
