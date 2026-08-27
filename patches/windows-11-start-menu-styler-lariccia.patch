@@ -1,0 +1,13 @@
+diff --git a/upstream/windows-11-start-menu-styler@1.7.wh.cpp b/mods/windows-11-start-menu-styler-lariccia.wh.cpp
+index e9cc96f..d5c469a 100644
+--- a/upstream/windows-11-start-menu-styler@1.7.wh.cpp
++++ b/mods/windows-11-start-menu-styler-lariccia.wh.cpp
+@@ -1,6 +1,6 @@
+ // ==WindhawkMod==
+-// @id              windows-11-start-menu-styler
+-// @name            Windows 11 Start Menu Styler
++// @id              windows-11-start-menu-styler-lariccia
++// @name            Windows 11 Start Menu Styler (LaRiccia fork)
+ // @description     Customize the Start menu with themes contributed by others or create your own
+ // @version         1.7
+ // @author          m417z

@@ -1,0 +1,11 @@
+# Build outputs and editor-buffer backups
+build/
+
+# Windhawk compile artifacts
+*.dll
+*.o
+*.obj
+
+# OS noise
+Thumbs.db
+desktop.ini
