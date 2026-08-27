@@ -33,6 +33,53 @@ build/      scratch: editor-buffer backups (gitignored)
 |---|---|---|
 | `windows-11-start-menu-styler-fork` | `windows-11-start-menu-styler` | 1.7 |
 
+## Custom theme: OnlySearch (Minimal) + profile & power
+
+**This is the one to use.** Select **"OnlySearch (Minimal) + profile & power"**
+in the mod's Theme setting.
+
+Built directly on OnlySearch (Minimal) -- that base renders correctly, so it is
+copied verbatim and changed as little as possible:
+
+```
+[avatar]        [ (o) Search for apps, settings... ]        [power]
+```
+
+### Why the first attempt showed neither control
+
+Both `StartDocked.UserTileView` (profile picture) and
+`StartDocked.PowerOptionsView` (power button) are children of
+`StartDocked.NavigationPaneView#NavigationPane`.
+
+OnlySearch (Minimal) collapses that parent. A collapsed parent makes its
+children unrenderable no matter what is set on them -- so every rule aimed at
+the avatar and power button was dead on arrival.
+
+This theme keeps `NavigationPane` visible and positions the two controls
+directly. It also does **not** carry over Minimal's `Grid#NavPanePlaceholder`
+collapse, for the same reason.
+
+Vertical placement uses `RenderTransform` rather than `Margin` deliberately:
+`RenderTransform` does not participate in layout, so nudging the row cannot
+re-expand the bar back into a full-height Start menu.
+
+### Tuning
+
+All positioning is style constants -- override in the mod's **Style constants**
+setting, no recompile:
+
+| Constant | Default | Controls |
+|---|---|---|
+| `RowShiftY` | `0` | **vertical position of avatar + power.** If they sit too high or too low, change only this |
+| `RowHeight` | `48` | height of the row hosting them |
+| `IconSize` | `32` | avatar and power button size |
+| `UserTileMargin` | `16,0,0,0` | avatar distance from the left edge |
+| `PowerMargin` | `0,0,16,0` | power button distance from the right edge |
+| `SearchInset` | `72,-2,72,2` | search box margins, i.e. the gap left for both controls |
+
+Negative values are fine and expected -- the official styling guide relocates
+the power button with `Margin=-580,-1330,0,0`.
+
 ## Custom theme: FrostyGlass Search Line
 
 A merged theme added to the fork. Select **"FrostyGlass Search Line (one-line

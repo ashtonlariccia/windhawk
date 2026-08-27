@@ -441,6 +441,7 @@ from the **TranslucentTB** project.
   - LegacyFluent: LegacyFluent
   - OnlySearch: OnlySearch
   - OnlySearch_variant_Minimal: OnlySearch (Minimal)
+  - OnlySearchUserPower: OnlySearch (Minimal) + profile & power
   - WindowGlass: WindowGlass (for the redesigned Start menu)
   - Fluid: Fluid (for the redesigned Start menu)
   - Oversimplified&Accentuated: Oversimplified&Accentuated
@@ -4452,6 +4453,109 @@ const Theme g_themeOnlySearch_variant_Minimal = {{
     ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
         L"Margin=0,-2,0,2"}},
 }};
+
+// Search-only minimal bar, plus the profile picture on the left and the power
+// button on the right, all on one row.
+//
+// Derived from g_themeOnlySearch_variant_Minimal. Two rules from that theme are
+// deliberately NOT carried over:
+//
+//   StartDocked.NavigationPaneView#NavigationPane  -> Collapsed
+//   Grid#NavPanePlaceholder                        -> Collapsed
+//
+// NavigationPane is the parent of BOTH StartDocked.UserTileView and
+// StartDocked.PowerOptionsView. Collapsing it makes its children unrenderable
+// no matter what is set on them -- which is why they did not appear before.
+//
+// Vertical placement uses RenderTransform rather than Margin on purpose:
+// RenderTransform does not participate in layout, so nudging the row cannot
+// re-expand the bar back to a full-height Start menu.
+const Theme g_themeOnlySearchUserPower = {{
+    // ---- base: OnlySearch (Minimal) ----
+    ThemeTargetStyles{L"Frame#StartFrame", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#MainContent > Grid", {
+        L"Grid.Row=3",
+        L"VerticalAlignment=Top"}},
+    ThemeTargetStyles{L"Grid#AnimationRoot", {
+        L"Height=100",
+        L"VerticalAlignment=Bottom"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Shapes.Rectangle#MaxHeightEnforcer", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#MainContent", {
+        L"Margin=0,-60,0,0"}},
+    ThemeTargetStyles{L"Grid#UndockedRoot", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#InnerContent", {
+        L"Margin=0,16,0,0"}},
+    ThemeTargetStyles{L"StartDocked.StartSizingFrame", {
+        L"MaxHeight=60",
+        L"MinHeight=60"}},
+    ThemeTargetStyles{L"Border#AcrylicOverlay", {
+        L"Visibility=Collapsed"}},
+
+    // ---- nav pane stays alive; it hosts the two controls ----
+    ThemeTargetStyles{L"StartDocked.NavigationPaneView#NavigationPane", {
+        L"Visibility=0",
+        L"VerticalAlignment=Center",
+        L"HorizontalAlignment=Stretch",
+        L"Height=$RowHeight",
+        L"Margin=0,0,0,0",
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$RowShiftY\" />"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneView > Grid#RootPanel", {
+        L"Height=$RowHeight",
+        L"Margin=0,0,0,0",
+        L"VerticalAlignment=Center",
+        L"HorizontalAlignment=Stretch"}},
+
+    // ---- profile picture: left of the search box, still clickable ----
+    ThemeTargetStyles{L"StartDocked.UserTileView", {
+        L"Visibility=0",
+        L"HorizontalAlignment=Left",
+        L"VerticalAlignment=Center",
+        L"Height=$IconSize",
+        L"Width=$IconSize",
+        L"MaxWidth=Auto",
+        L"Margin=$UserTileMargin"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#UserTileButton", {
+        L"Visibility=0",
+        L"Height=$IconSize",
+        L"Width=$IconSize",
+        L"VerticalAlignment=Center"}},
+    ThemeTargetStyles{L"TextBlock#UserTileNameText", {
+        L"Visibility=Collapsed"}},
+
+    // ---- power button: hard right ----
+    ThemeTargetStyles{L"StartDocked.PowerOptionsView", {
+        L"Visibility=0",
+        L"HorizontalAlignment=Right",
+        L"VerticalAlignment=Center",
+        L"Height=$IconSize",
+        L"Width=$IconSize",
+        L"MaxWidth=Auto",
+        L"Margin=$PowerMargin"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#PowerButton", {
+        L"Visibility=0",
+        L"Height=$IconSize",
+        L"Width=$IconSize",
+        L"VerticalAlignment=Center"}},
+
+    // ---- make room in the middle for both ----
+    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
+        L"Margin=$SearchInset"}},
+    ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton", {
+        L"Margin=$SearchInset"}},
+}, {
+    // Tune these from the mod's "Style constants" setting -- no recompile.
+    // If the avatar/power sit too high or too low, change RowShiftY only.
+    L"RowShiftY=0",
+    L"RowHeight=48",
+    L"IconSize=32",
+    L"UserTileMargin=16,0,0,0",
+    L"PowerMargin=0,0,16,0",
+    L"SearchInset=72,-2,72,2",
+}};
+
 
 const Theme g_themeWindowGlass = {{
     ThemeTargetStyles{L"StackPanel#TimeAndDatePanel", {
@@ -15606,6 +15710,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
                     : &g_themeOnlySearch_variant_ClassicStartMenu;
     } else if (wcscmp(themeName, L"OnlySearch_variant_Minimal") == 0) {
         theme = &g_themeOnlySearch_variant_Minimal;
+    } else if (wcscmp(themeName, L"OnlySearchUserPower") == 0) {
+        theme = &g_themeOnlySearchUserPower;
     } else if (wcscmp(themeName, L"WindowGlass") == 0) {
         theme = &g_themeWindowGlass;
     } else if (wcscmp(themeName, L"WindowGlass_variant_Minimal") == 0) {
