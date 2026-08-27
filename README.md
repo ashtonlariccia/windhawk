@@ -31,7 +31,7 @@ build/      scratch: editor-buffer backups (gitignored)
 
 | Fork | Upstream | Baseline |
 |---|---|---|
-| `windows-11-start-menu-styler-lariccia` | `windows-11-start-menu-styler` | 1.7 |
+| `windows-11-start-menu-styler-fork` | `windows-11-start-menu-styler` | 1.7 |
 
 ## Custom theme: FrostyGlass Search Line
 

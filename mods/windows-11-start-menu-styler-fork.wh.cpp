@@ -1,6 +1,6 @@
 // ==WindhawkMod==
-// @id              windows-11-start-menu-styler-lariccia
-// @name            Windows 11 Start Menu Styler (LaRiccia fork)
+// @id              windows-11-start-menu-styler-fork
+// @name            Windows 11 Start Menu Styler - Fork
 // @description     Customize the Start menu with themes contributed by others or create your own
 // @version         1.7
 // @author          m417z
