@@ -11,7 +11,7 @@
 // @include         SearchHost.exe
 // @include         SearchApp.exe
 // @architecture    x86-64
-// @compilerOptions -lcomctl32 -lole32 -loleaut32 -lruntimeobject -lversion
+// @compilerOptions -lcomctl32 -lole32 -loleaut32 -lpdh -lpsapi -lruntimeobject -lversion
 // ==/WindhawkMod==
 
 // Source code is published under The GNU General Public License v3.0.
@@ -423,6 +423,7 @@ from the **TranslucentTB** project.
   $options:
   - "": None
   - TranslucentStartMenu: TranslucentStartMenu
+  - TranslucentSearchOnly: TranslucentStartMenu - search, profile & power only
   - NoRecommendedSection: NoRecommendedSection
   - SideBySide: SideBySide
   - SideBySide2: SideBySide2
@@ -447,6 +448,7 @@ from the **TranslucentTB** project.
   - Oversimplified&Accentuated: Oversimplified&Accentuated
   - LiquidGlass2: LiquidGlass (for the redesigned Start menu)
   - LiquidGlass: LiquidGlass (Legacy) (for the redesigned Start menu)
+  - LiquidGlassSearchOnly: LiquidGlass (Legacy) - search, profile & power only
   - Windows10X: Windows10X
   - TintedGlass: TintedGlass
   - LayerMicaUI: LayerMicaUI (for the redesigned Start menu)
@@ -497,6 +499,66 @@ from the **TranslucentTB** project.
   $name: Search WebView styles
 - webContentCustomJs: ""
   $name: Search WebView custom JavaScript code
+- sysInfoEnabled: false
+  $name: System information panel
+  $description: >-
+    Fills the emptied middle of the Start menu with a Task Manager style
+    performance readout: text only, label on the left and a live value on the
+    right.
+
+    Meant for the search-only themes, which collapse the app content and leave
+    that space as glass. The panel takes the exact layout slot the collapsed
+    content occupied, so the search box stays above it and the profile picture
+    and power button stay below it. With a theme that keeps the app list
+    visible it would be drawn over the top of that list.
+- sysInfoCpu: true
+  $name: "System information: CPU section"
+  $description: >-
+    Utilization, speed, processes, threads, handles and up time.
+- sysInfoMemory: true
+  $name: "System information: Memory section"
+  $description: >-
+    In use, available, committed, cached, paged pool and non-paged pool.
+- sysInfoDisk: true
+  $name: "System information: Disk section"
+  $description: >-
+    Active time, read and write throughput across all physical disks, plus free
+    space on the drive selected below.
+- sysInfoNetwork: true
+  $name: "System information: Network section"
+  $description: >-
+    Send and receive throughput for the busiest real adapter, which is named in
+    the heading. Reported in bits per second, as Task Manager does, so a
+    1 MB/s download reads as 8 Mbps.
+- sysInfoGpu: false
+  $name: "System information: GPU section"
+  $description: >-
+    3D engine utilization. Off by default because it is the one figure here
+    that needs a wildcard performance counter, and on a machine with many GPU
+    engine instances that costs meaningfully more to sample than everything
+    else on this list put together.
+- sysInfoColumns: 2
+  $name: "System information: columns"
+  $description: >-
+    How many sections to place side by side. Sections flow into rows after
+    this many. Two fits a stock-width Start menu comfortably.
+- sysInfoIntervalMs: 1000
+  $name: "System information: refresh interval (ms)"
+  $description: >-
+    Sampling only happens while the Start menu is actually on screen, so this
+    costs nothing while it is closed.
+- sysInfoFontSize: 12
+  $name: "System information: font size"
+- sysInfoDiskLetter: "C"
+  $name: "System information: drive"
+  $description: >-
+    Which drive's free space to report. The throughput figures above it cover
+    all physical disks regardless.
+- sysInfoPadding: "28,8,28,8"
+  $name: "System information: padding"
+  $description: >-
+    Space between the panel and the edges of the slot it fills, as
+    left,top,right,bottom.
 */
 // ==/WindhawkModSettings==
 
@@ -729,6 +791,421 @@ const Theme g_themeTranslucentStartMenu_variant_ClassicStartMenu = {{
         L"CornerRadius=4"}},
 }, {
     L"CommonBgBrush=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#25323232\"/>",
+}};
+
+// TranslucentStartMenu with the middle taken out: the pinned list, the
+// category folders, the all-apps grid and the recommended section are gone,
+// leaving the search box, the profile picture and the power button.
+//
+// Every TranslucentStartMenu style is copied over verbatim -- the fork only
+// appends -- and nothing is done to the size or the scale of the menu. The
+// window is the size Windows gives it; the space the app content used to fill
+// is simply left as empty glass.
+const Theme g_themeTranslucentSearchOnly = {{
+    ThemeTargetStyles{L"Border#AcrylicBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#AcrylicOverlay", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#BorderElement", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15000000\"/>",
+        L"BorderThickness=0",
+        L"CornerRadius=10"}},
+    ThemeTargetStyles{L"MenuFlyoutPresenter > Border", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#22000000\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"Border#AppBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#AccentAppBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#LayerBorder", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#TaskbarSearchBackground", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15000000\"/>",
+        L"BorderThickness=0",
+        L"CornerRadius=10"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"Background@Pressed:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@Pressed:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>"}},
+    ThemeTargetStyles{L"Button#ShowAllAppsButton > ContentPresenter@CommonStates", {
+        L"Background@Normal:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15C0C0C0\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.5\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton > Grid > Border#BorderElement", {
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#UserTileButton > Grid@CommonStates > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.5\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.AppListViewItem > Grid@CommonStates > Border", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.45\"/>",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.7\"/>",
+        L"BorderThickness=1",
+        L"Margin@Normal=4"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#PowerButton > Grid@CommonStates > Border", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.45\"/>",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.7\"/>",
+        L"BorderThickness=1",
+        L"Margin@Normal=4"}},
+    ThemeTargetStyles{L"ToolTip > ContentPresenter#LayoutRoot", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#22000000\"/>"}},
+    ThemeTargetStyles{L"Border#dropshadow", {
+        L"CornerRadius=16",
+        L"Margin=-1"}},
+    ThemeTargetStyles{L"Border#StartDropShadow", {
+        L"CornerRadius=15",
+        L"Margin=-1"}},
+    ThemeTargetStyles{L"Grid#TopLevelSuggestionsRoot", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"TextBlock#Text", {
+        L"Foreground=White"}},
+    ThemeTargetStyles{L"Microsoft.UI.Xaml.Controls.DropDownButton > Grid#RootGrid", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.6\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"Button > Grid@CommonStates > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.6\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"DropDownButton", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.2\"/>"}},
+    ThemeTargetStyles{L"Button#Header > Border#Border@CommonStates", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.6\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>"}},
+    ThemeTargetStyles{L"StartMenu.FolderModal > Grid > Border", {
+        L"Background:=$CommonBgBrush",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"ListViewItem > Grid#ContentBorder@CommonStates", {
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.9\"/>",
+        L"BorderThickness=1",
+        L"CornerRadius=5"}},
+
+    // ------------------------------------------------------------------
+    // Fork: strip the middle. Everything above this line is
+    // TranslucentStartMenu verbatim, so the delta against a future
+    // upstream release stays easy to replay. Everything below removes the
+    // app content and leaves the search box, the profile picture and the
+    // power button.
+    //
+    // In the redesigned Start menu, Grid#MainContent holds three rows:
+    //
+    //   row 0  the search box
+    //   row 1  Frame#StartFrame -- the pinned list, the category folders,
+    //          the all-apps grid and the recommended section: everything
+    //          being removed here
+    //   row 2  Grid#NavPanePlaceholder -- the bottom tray holding the
+    //          profile picture and the power button
+    //
+    // Nothing below touches size or scale. The sibling fork themes
+    // ("LiquidGlass (Legacy) - search, profile & power only", "FrostyGlass
+    // Search Line") go on to pin a height onto every ancestor of row 1,
+    // because that row is star-sized and keeps claiming whatever space is
+    // going even after it is collapsed. That is deliberately NOT done
+    // here: the menu keeps its stock size and the vacated middle is left
+    // as empty glass. Rectangle#MaxHeightEnforcer, which those themes also
+    // collapse, is left alone for the same reason.
+    // ------------------------------------------------------------------
+
+    // ---- row 1 goes away ----
+    ThemeTargetStyles{L"Frame#StartFrame", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#UndockedRoot", {
+        L"Visibility=Collapsed"}},
+
+    // ---- and so does the companion panel on the right ----
+    //
+    // Not strictly "the middle", so it gets its own constant: put
+    // CompanionVisibility=Visible in the mod's "Style constants" setting to
+    // keep the phone-link panel.
+    ThemeTargetStyles{L"Grid#RightCompanionContainerGrid", {
+        L"Visibility=$CompanionVisibility"}},
+    ThemeTargetStyles{L"StartMenu.StartMenuCompanion#RightCompanion", {
+        L"Visibility=$CompanionVisibility"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Primitives.ToggleButton#ShowHideCompanion", {
+        L"Visibility=$CompanionVisibility"}},
+
+    // ---- the three things that stay ----
+    //
+    // Grid#NavPanePlaceholder is the parent of BOTH StartDocked.UserTileView
+    // and StartDocked.PowerOptionsView. The OnlySearch themes collapse it,
+    // which is exactly why they show neither control -- a collapsed parent
+    // makes its children unrenderable no matter what is set on them. It is
+    // pinned visible here, and so is the nav pane inside it.
+    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"Grid#NavPanePlaceholder", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneView#NavigationPane", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.UserTileView", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.PowerOptionsView", {
+        L"Visibility=0"}},
+
+    // ------------------------------------------------------------------
+    // Optional: shrink the window to close the gap the app content left.
+    //
+    // $MenuHeight is the only knob, and its default is past what any
+    // display can reach -- so leaving it unset caps nothing and the menu
+    // is exactly what it is without this block.
+    //
+    // Collapsing Frame#StartFrame does not shrink anything by itself: that
+    // row is star-sized, so it goes on claiming whatever space is
+    // available and you get a full-height panel with a search box floating
+    // in it. Capping the frame is what shrinks it.
+    //
+    // ONE element is capped, with MaxHeight, and nothing else is touched.
+    // That is deliberate. An earlier revision of this theme pinned Height,
+    // MinHeight and MaxHeight on Grid#FrameRoot, Grid#AnimationRoot,
+    // Grid#MainMenu and StartDocked.StartSizingFrame all to the same
+    // number, and then needed a pile of shift constants to correct what
+    // that did. Those four boxes do not share a top edge, so pinning them
+    // to one value stacks their offsets up and the content appears to
+    // slide: too small and the tray goes off the bottom, too large and the
+    // frame overflows the screen-capped window and takes the search box
+    // off the top.
+    //
+    // OnlySearch caps a single element -- Grid#FrameRoot in the redesigned
+    // layout, StartDocked.StartSizingFrame in the classic one -- and does
+    // nothing else at all. That is what is copied here. Both are listed in
+    // both variants; the one that is not in this build's tree simply does
+    // not match.
+    //
+    // Grid#MainContent, the search box and the tray are all left alone for
+    // the same reason: with nothing pinned inside it, MainContent fills
+    // whatever the capped frame gives it and its rows land where they
+    // belong. So do the glass layers, which stretch to the window and keep
+    // their borders and their corner radii without help.
+    //
+    // MainContent does start some way below the frame's top edge --
+    // OnlySearch (Minimal) compensates for the same offset with
+    // Margin=0,-60,0,0 -- so the usable area is roughly $MenuHeight minus
+    // that offset. That is why $MenuHeight has to clear the two rows by a
+    // good margin rather than merely equal their combined height, and why
+    // 150 is too small: ~60 offset + ~48 search + ~56 tray needs ~165
+    // before anything fits at all.
+    // ------------------------------------------------------------------
+    ThemeTargetStyles{L"Grid#FrameRoot", {
+        L"MaxHeight=$MenuHeight",
+        L"MinHeight=0"}},
+    ThemeTargetStyles{L"StartDocked.StartSizingFrame", {
+        L"MaxHeight=$MenuHeight",
+        L"MinHeight=0"}},
+
+}, {
+    L"CommonBgBrush=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#25323232\"/>",
+    // The phone-link companion panel on the right. Set this to Visible in
+    // the mod's "Style constants" setting to keep it.
+    L"CompanionVisibility=Collapsed",
+    // ---- optional height: the only knob ----
+    //
+    // 100000 is past any display, so unset this caps nothing. Set it in
+    // the mod's "Style constants" setting; no recompile needed:
+    //
+    //   MenuHeight=200
+    //
+    // It caps the whole window, and the usable area inside is roughly this
+    // minus the ~60px offset above Grid#MainContent -- so it needs to
+    // clear ~165 before the search row and the tray both fit. Start at 220
+    // and work down until it is snug.
+    L"MenuHeight=100000",
+}};
+
+// The same thing for the classic Start menu layout, built on
+// TranslucentStartMenu's classic variant.
+const Theme g_themeTranslucentSearchOnly_variant_ClassicStartMenu = {{
+    ThemeTargetStyles{L"Border#AcrylicBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#AcrylicOverlay", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#BorderElement", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15000000\"/>",
+        L"BorderThickness=0",
+        L"CornerRadius=10"}},
+    ThemeTargetStyles{L"Grid#ShowMoreSuggestions", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#SuggestionsParentContainer", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#TopLevelSuggestionsListHeader", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"StartMenu.PinnedList", {
+        L"Height=504"}},
+    ThemeTargetStyles{L"MenuFlyoutPresenter > Border", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#00000000\"/>",
+        L"BorderThickness=0"}},
+    ThemeTargetStyles{L"Border#AppBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#AccentAppBorder", {
+        L"Background:=$CommonBgBrush",
+        L"BorderThickness=0",
+        L"CornerRadius=15"}},
+    ThemeTargetStyles{L"Border#LayerBorder", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#TaskbarSearchBackground", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15000000\"/>",
+        L"BorderThickness=0",
+        L"CornerRadius=10"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"0\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"Margin=1",
+        L"Background@Pressed:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@Pressed:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>"}},
+    ThemeTargetStyles{L"Button#ShowAllAppsButton > ContentPresenter@CommonStates", {
+        L"Background@Normal:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15C0C0C0\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.5\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton#StartMenuSearchBox > Grid > Border#BorderElement", {
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#UserTileButton > Grid@CommonStates > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"0\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.5\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.AppListViewItem > Grid@CommonStates > Border", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.45\"/>",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.7\"/>",
+        L"BorderThickness=1",
+        L"Margin@Normal=4"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton#PowerButton > Grid@CommonStates > Border", {
+        L"Background:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.45\"/>",
+        L"BorderBrush:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.7\"/>",
+        L"BorderThickness=1",
+        L"Margin@Normal=4"}},
+    ThemeTargetStyles{L"ToolTip > ContentPresenter#LayoutRoot", {
+        L"Background:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#00000000\"/>"}},
+    ThemeTargetStyles{L"StartDocked.AllAppsGridListViewItem > Grid@CommonStates > Border", {
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.8\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.55\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"Button#CloseAllAppsButton > ContentPresenter@CommonStates", {
+        L"Background@Normal:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15C0C0C0\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.5\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"1\"/>",
+        L"BorderThickness=1"}},
+    ThemeTargetStyles{L"StartDocked.AllAppsZoomListViewItem > Grid@CommonStates > Border", {
+        L"Background@Normal:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"0\" Opacity=\"0.2\"/>",
+        L"Background@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.3\"/>",
+        L"BorderBrush@PointerOver:=<RevealBorderBrush Color=\"Transparent\" TargetTheme=\"1\" Opacity=\"0.6\"/>"}},
+    ThemeTargetStyles{L"Border#dropshadow", {
+        L"CornerRadius=16",
+        L"Margin=-1"}},
+    ThemeTargetStyles{L"Border#DropShadow", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#StartDropShadow", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#RootGridDropShadow", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Border#RightCompanionDropShadow", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"StartDocked.AllAppsGridListViewItem > Grid#ContentBorder@CommonStates", {
+        L"Background@PointerOver:=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#15C0C0C0\"/>",
+        L"CornerRadius=4"}},
+
+    // ------------------------------------------------------------------
+    // Fork: strip the middle. Everything above this line is
+    // TranslucentStartMenu's classic variant verbatim.
+    //
+    // The classic Start menu keeps its app content in two roots rather than
+    // in one frame: Grid#UndockedRoot holds the pinned list and the
+    // recommended section, Grid#AllAppsRoot holds the all-apps list.
+    // (OnlySearch's classic variant collapses UndockedRoot alone -- that is
+    // what makes it a search-only menu.) The search box, the nav pane and
+    // the profile picture + power button inside it all sit outside both
+    // roots, so they survive untouched.
+    //
+    // As in the redesigned variant above, no height is pinned anywhere:
+    // the menu keeps its stock size and the vacated middle is empty glass.
+    // ------------------------------------------------------------------
+
+    // ---- the middle goes away ----
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#UndockedRoot", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#AllAppsRoot", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#TopLevelSuggestionsContainer", {
+        L"Visibility=Collapsed"}},
+    // Nothing left for these two to switch between.
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Button#ShowAllAppsButton", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Button#CloseAllAppsButton", {
+        L"Visibility=Collapsed"}},
+
+    // ---- and so does the companion panel on the right ----
+    ThemeTargetStyles{L"Grid#RightCompanionContainerGrid", {
+        L"Visibility=$CompanionVisibility"}},
+    ThemeTargetStyles{L"StartDocked.StartMenuCompanion#RightCompanion", {
+        L"Visibility=$CompanionVisibility"}},
+
+    // ---- the three things that stay ----
+    ThemeTargetStyles{L"StartDocked.SearchBoxToggleButton#StartMenuSearchBox", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneView#NavigationPane", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.UserTileView", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.PowerOptionsView", {
+        L"Visibility=0"}},
+
+    // ------------------------------------------------------------------
+    // Optional: shrink the window to close the gap the app content left.
+    //
+    // Same single knob as the redesigned variant above, and the same rule:
+    // cap one element with MaxHeight and touch nothing else. The classic
+    // layout's is StartDocked.StartSizingFrame, which is the only thing
+    // OnlySearch's classic variant does besides collapsing the app
+    // content. Grid#FrameRoot is listed too and simply does not match if
+    // this build has no such element.
+    //
+    // $MenuHeight defaults past any display's height, so unset it caps
+    // nothing and the menu is exactly what it is without this block.
+    // ------------------------------------------------------------------
+    ThemeTargetStyles{L"StartDocked.StartSizingFrame", {
+        L"MaxHeight=$MenuHeight",
+        L"MinHeight=0"}},
+    ThemeTargetStyles{L"Grid#FrameRoot", {
+        L"MaxHeight=$MenuHeight",
+        L"MinHeight=0"}},
+
+}, {
+    L"CommonBgBrush=<WindhawkBlur BlurAmount=\"25\" TintColor=\"#25323232\"/>",
+    L"CompanionVisibility=Collapsed",
+    // ---- optional height: the only knob ----
+    //
+    // 100000 is past any display, so unset this caps nothing. Set it in
+    // the mod's "Style constants" setting; no recompile needed:
+    //
+    //   MenuHeight=200
+    //
+    // It caps the whole window, and the usable area inside is roughly this
+    // minus the ~60px offset above Grid#MainContent -- so it needs to
+    // clear ~165 before the search row and the tray both fit. Start at 220
+    // and work down until it is snug.
+    L"MenuHeight=100000",
 }};
 
 const Theme g_themeNoRecommendedSection = {{
@@ -5849,6 +6326,360 @@ const Theme g_themeLiquidGlass = {{
         L"transition: background-color 0.083s ease-in-out !important"}},
 }, DisableNewStartMenuLayout::forceNewLayout};
 
+// LiquidGlass (Legacy) with the app content removed.
+//
+// Same glass styling as LiquidGlass (Legacy) -- copied verbatim, so it stays
+// easy to replay onto a newer upstream -- but the pinned list, the category
+// folders, the all-apps grid and the recommended section are all gone. What
+// is left is the search box on top and the bottom tray with the profile
+// bubble and the power bubble:
+//
+//     [ (o) Search for apps, settings, and documents ]
+//     [ (avatar)                              (power) ]
+//
+// Like its parent it forces the redesigned Start menu layout.
+const Theme g_themeLiquidGlassSearchOnly = {{
+    // These three are LiquidGlass's rules with two fork changes each:
+    //
+    //   $PanelBorderThickness instead of $BorderThickness, so the bottom edge
+    //   is drawn as heavily as the top and the bottom corners read like the
+    //   top pair;
+    //
+    //   $PanelInset, which pulls the glass up off the bottom of the layout box
+    //   so its rounded corners land inside the visible area.
+    //
+    // The inset is a Margin, not a MaxHeight. These borders are stretch-sized
+    // by their parent, so capping their height does nothing at all -- which is
+    // exactly what capping it achieved. Down Aero insets the same layer the
+    // same way (Border#AcrylicOverlay, Margin=0,0,0,20).
+    ThemeTargetStyles{L"Border#AcrylicOverlay", {
+        L"Visibility=1",
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#AcrylicBorder", {
+        L"Background:=$Background",
+        L"BorderBrush:=$BorderBrush",
+        L"BorderThickness=$PanelBorderThickness",
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#AppBorder", {
+        L"Background:=$Background",
+        L"BorderBrush:=$BorderBrush",
+        L"BorderThickness=$PanelBorderThickness",
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid > Border#BackgroundBorder", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Button > Grid@CommonStates > Border#BackgroundBorder", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"StartMenu.CategoryControl > Grid > Border", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"Background:=$ElementBackground",
+        L"Opacity=0.8",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Grid#LayoutRoot", {
+        L"BackgroundTransition:=<BrushTransition Duration=\"0:0:0.083\" />"}},
+    ThemeTargetStyles{L"Border#BackgroundBorder", {
+        L"BackgroundTransition:=<BrushTransition Duration=\"0:0:0.083\" />"}},
+    ThemeTargetStyles{L"Button#Header > Border@CommonStates", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"ListViewItem > Grid@CommonStates > Border#BorderBackground", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton > Grid@CommonStates > Border#BorderElement", {
+        L"CornerRadius=$ElementCornerRadius",
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush:=$ElementBorderBrush",
+        L"Background@Checked:=$ElementBackground",
+        L"Background@CheckedPointerOver:=$AccentBackground",
+        L"Background@CheckedPressed:=$ElementBackground2",
+        L"BackgroundTransition:=<BrushTransition Duration=\"0:0:0.083\" />"}},
+    ThemeTargetStyles{L"Button#HideMoreSuggestionsButton > Grid@CommonStates > Border#BackgroundBorder", {
+        L"Background@Normal:=$ElementBackground",
+        L"BorderBrush@Normal:=$ElementBorderBrush",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"Background@PointerOver:=$AccentBackground",
+        L"Background@Pressed:=$ElementBackground2",
+        L"BorderThickness=$ElementBorderThickness",
+        L"Margin=2",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Button#ShowMoreSuggestionsButton > Grid@CommonStates > Border#BackgroundBorder", {
+        L"Background@Normal:=$ElementBackground",
+        L"BorderBrush@Normal:=$ElementBorderBrush",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"Background@PointerOver:=$AccentBackground",
+        L"Background@Pressed:=$ElementBackground2",
+        L"BorderThickness=$ElementBorderThickness",
+        L"Margin=2",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"StartMenu.FolderModal > Grid#Root > Border", {
+        L"BorderThickness=$BorderThickness",
+        L"BorderBrush:=$BorderBrush",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"MenuFlyoutPresenter > Border", {
+        L"BorderThickness=$BorderThickness",
+        L"BorderBrush:=$BorderBrush",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > ContentPresenter#ContentPresenter > ContentControl > Grid#RootGrid > Border#LogoBackgroundPlate > Image#AllAppsItemLogo", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneButton > Grid@CommonStates > Border#BackgroundBorder", {
+        L"BorderThickness=$ElementBorderThickness",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"StartDocked.AppListViewItem > Grid@CommonStates > Border#BackgroundBorder", {
+        L"BorderThickness=$BorderThickness",
+        L"BorderBrush@PointerOver:=$BorderBrush",
+        L"BorderBrush@Pressed:=$BorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Microsoft.UI.Xaml.Controls.DropDownButton > Grid@CommonStates", {
+        L"Background@PointerOver:=$AccentBackground",
+        L"Background@Pressed:=$ElementBackground2",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BackgroundSizing=InnerBorderEdge",
+        L"Background@Normal:=$ElementBackground",
+        L"BorderBrush@Normal:=$ElementBorderBrush",
+        L"Padding=9,3,7,4",
+        L"CornerRadius=$ElementCornerRadius",
+        L"BorderThickness@Normal=$ElementBorderThickness",
+        L"BorderThickness@PointerOver=$ElementBorderThickness",
+        L"BorderThickness@Pressed=$ElementBorderThickness"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > ContentPresenter#ContentPresenter > ContentControl > Grid#RootGrid > Grid#LogoContainer > Image#AllAppsTileLogo", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Border#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > ContentPresenter > Grid > Grid#LogoContainer > Grid", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Grid#ContentBorder@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > ContentPresenter > Grid > Grid#LogoContainer > Grid", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"ScrollViewer#MenuFlyoutPresenterScrollViewer > Border > Grid > ScrollContentPresenter > ItemsPresenter > StackPanel", {
+        L"ChildrenTransitions:=<TransitionCollection><EntranceThemeTransition IsStaggeringEnabled=\"False\" FromHorizontalOffset=\"-25\" FromVerticalOffset=\"0\" /></TransitionCollection>"}},
+    ThemeTargetStyles{L"FlyoutPresenter > Border > ScrollViewer > Border > Grid > ScrollContentPresenter > ContentPresenter > Border", {
+        L"BorderBrush:=$BorderBrush",
+        L"BorderThickness=$BorderThickness",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Button > ContentPresenter#ContentPresenter@CommonStates", {
+        L"Background@PointerOver:=$AccentBackground",
+        L"Background@Pressed:=$ElementBackground2",
+        L"BorderBrush@PointerOver:=$ElementBorderBrush",
+        L"BorderBrush@Pressed:=$ElementBorderBrush",
+        L"BorderThickness=$ElementBorderThickness",
+        L"Background@Normal=$ElementBackground",
+        L"CornerRadius=$ElementCornerRadius"}},
+    ThemeTargetStyles{L"Grid@SearchBoxInputStates > Border#TaskbarSearchBackground", {
+        L"CornerRadius=$ElementCornerRadius",
+        L"Background@ActiveInput:=$ElementBackground2",
+        L"BorderBrush:=$ElementBorderBrush",
+        L"BorderThickness=$ElementBorderThickness",
+        L"Background@SearchBoxHover:=$AccentBackground",
+        L"Background@NoFocus:=$ElementBackground",
+        L"BackgroundTransition:=<BrushTransition Duration=\"0:0:0.083\" />"}},
+    ThemeTargetStyles{L"Border@CommonStates > Grid#DroppedFlickerWorkaroundWrapper > ContentPresenter > Grid > Grid#LogoContainer > Image", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5"}},
+    ThemeTargetStyles{L"Grid#ContentBorder@CommonStates > ContentPresenter > Grid > Grid#LogoContainer > Grid", {
+        L"RenderTransform@Pressed:=<ScaleTransform ScaleX=\"0.8\" ScaleY=\"0.8\" />",
+        L"RenderTransformOrigin=0.5,0.5"}},
+
+    // ------------------------------------------------------------------
+    // Fork: strip the middle. Everything above this line is LiquidGlass
+    // (Legacy) verbatim; everything below removes the app content and
+    // leaves the search box, the profile bubble and the power bubble.
+    //
+    // In the redesigned Start menu, Grid#MainContent holds three rows:
+    //
+    //   row 0  the search box
+    //   row 1  Frame#StartFrame  -- pinned list, category folders, all
+    //          apps and recommended: everything being removed here
+    //   row 2  Grid#NavPanePlaceholder -- the bottom tray holding the
+    //          profile picture and the power button
+    //
+    // (LiquidGlass takes the same view of the tree: it spans StartFrame
+    // over all three rows at Canvas.ZIndex=-1 so the search box and the
+    // tray float above it.)
+    // ------------------------------------------------------------------
+
+    // ---- row 1 goes away ----
+    ThemeTargetStyles{L"Frame#StartFrame", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Shapes.Rectangle#MaxHeightEnforcer", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Grid#UndockedRoot", {
+        L"Visibility=Collapsed"}},
+
+    // ---- and so does the companion panel on the right ----
+    ThemeTargetStyles{L"Grid#RightCompanionContainerGrid", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"StartMenu.StartMenuCompanion#RightCompanion", {
+        L"Visibility=Collapsed"}},
+    ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Primitives.ToggleButton#ShowHideCompanion", {
+        L"Visibility=Collapsed"}},
+
+    // ---- shrink the window down to the two rows that are left ----
+    //
+    // Collapsing row 1 alone leaves the menu full height: that row is
+    // star-sized, so it keeps claiming whatever space is going. The
+    // height is therefore pinned on every ancestor of it, which is the
+    // same thing the FrostyGlass Search Line theme has to do.
+    ThemeTargetStyles{L"StartMenu.StartBlendedFlexFrame", {
+        L"Height=Auto"}},
+    ThemeTargetStyles{L"Grid#FrameRoot", {
+        L"Height=$MenuHeight",
+        L"MinHeight=$MenuHeight",
+        L"MaxHeight=$MenuHeight"}},
+    ThemeTargetStyles{L"Grid#AnimationRoot", {
+        L"Height=$MenuHeight",
+        L"MinHeight=$MenuHeight",
+        L"MaxHeight=$MenuHeight"}},
+    ThemeTargetStyles{L"Grid#MainMenu", {
+        L"Height=$MenuHeight",
+        L"MinHeight=$MenuHeight",
+        L"MaxHeight=$MenuHeight"}},
+    // Grid#MainContent is deliberately NOT height-pinned. Forcing $MenuHeight
+    // onto it is what pushed the tray off the bottom edge: MainContent starts
+    // some way below the frame's top (OnlySearch (Minimal) compensates for the
+    // same offset with Margin=0,-60,0,0), so a forced full-height box ends up
+    // hanging that far past the bottom of the window and the last row -- the
+    // tray -- goes with it. Left alone it simply fills whatever the pinned
+    // ancestors give it, and its bottom row lands on the window's bottom edge.
+    ThemeTargetStyles{L"Grid#MainContent", {
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$ContentShiftY\" />"}},
+    ThemeTargetStyles{L"StartDocked.StartSizingFrame", {
+        L"Height=$MenuHeight",
+        L"MinHeight=$MenuHeight",
+        L"MaxHeight=$MenuHeight"}},
+
+    // ---- the three things that stay ----
+    //
+    // Nudging uses RenderTransform rather than Margin on purpose: it does
+    // not participate in layout, so tuning either row cannot push the
+    // window back open to full height.
+    ThemeTargetStyles{L"StartMenu.SearchBoxToggleButton#SearchBoxToggleButton", {
+        L"Visibility=0",
+        L"Height=$SearchHeight",
+        L"MinHeight=$SearchHeight",
+        L"MaxHeight=$SearchHeight",
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$SearchShiftY\" />"}},
+    // NavPanePlaceholder is the parent of BOTH StartDocked.UserTileView and
+    // StartDocked.PowerOptionsView. The OnlySearch themes collapse it, which
+    // is exactly why they show neither bubble -- a collapsed parent makes its
+    // children unrenderable no matter what is set on them. It stays visible
+    // here, and so does the nav pane inside it.
+    ThemeTargetStyles{L"Grid#NavPanePlaceholder", {
+        L"Visibility=0",
+        L"Height=$TrayHeight",
+        L"MinHeight=$TrayHeight",
+        L"MaxHeight=$TrayHeight",
+        L"VerticalAlignment=Bottom",
+        L"RenderTransform:=<TranslateTransform X=\"0\" Y=\"$TrayShiftY\" />"}},
+    ThemeTargetStyles{L"StartDocked.NavigationPaneView#NavigationPane", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.UserTileView", {
+        L"Visibility=0"}},
+    ThemeTargetStyles{L"StartDocked.PowerOptionsView", {
+        L"Visibility=0"}},
+
+    // ---- bottom corners ----
+    //
+    // Everything that paints a corner has to agree on the radius, or the
+    // layer that does not gets a square bottom over the top of the ones that
+    // do. LiquidGlass never sets these because at full height they sit off
+    // the bottom of the screen where nobody sees them.
+    ThemeTargetStyles{L"Grid#Root > Border", {
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#LayerBorder", {
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#StartDropShadow", {
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    ThemeTargetStyles{L"Border#RootGridDropShadow", {
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+    // FrostyGlass Search Line reaches the outer shadow through this path, so
+    // it gets the same treatment rather than being left square underneath.
+    ThemeTargetStyles{L"Grid#OuterBorderGrid > Grid#BorderGrid > Border#dropshadow", {
+        L"Margin=$PanelInset",
+        L"CornerRadius=$CornerRadius"}},
+}, {
+    L"BorderThickness=0.3,1,0.3,0.3",
+    L"ElementBorderThickness=0.3,0.3,0.3,1",
+    L"CornerRadius=12",
+    L"ElementCornerRadius=8",
+    L"Background=<WindhawkBlur BlurAmount=\"15\" TintColor=\"{ThemeResource SystemAltLowColor}\" TintOpacity=\"0.2\" />",
+    L"ElementBackground=<WindhawkBlur BlurAmount=\"15\" TintColor=\"{ThemeResource SystemAltLowColor}\" TintOpacity=\"0.4\" />",
+    L"ElementBackground2 = <WindhawkBlur BlurAmount=\"15\" TintColor=\"{ThemeResource SystemAltLowColor}\" TintOpacity=\"0.2\"  />",
+    L"AccentBackground=<WindhawkBlur BlurAmount=\"15\" TintColor=\"{ThemeResource SystemAccentColorLight1}\" TintOpacity=\"0.2\"  />",
+    L"BorderBrush=<LinearGradientBrush StartPoint=\"0,0\" EndPoint=\"0,1\"><GradientStop Color=\"#50808080\" Offset=\"0.0\" /><GradientStop Color=\"#50404040\" Offset=\"0.25\" /><GradientStop Color=\"#50808080\" Offset=\"1\" /></LinearGradientBrush>\"",
+    L"ElementBorderBrush=<LinearGradientBrush StartPoint=\"0,0\" EndPoint=\"0,1\"><GradientStop Color=\"#50808080\" Offset=\"1\" /><GradientStop Color=\"#50606060\" Offset=\"0.15\" /></LinearGradientBrush>",
+    // ---- fork: layout of the stripped-down menu. Override any of these
+    // ---- in the mod's "Style constants" setting; no recompile needed.
+    //
+    // MenuHeight is the whole window. It has to cover the offset above
+    // MainContent as well as the two rows, so it runs larger than the two
+    // rows suggest. Too small and the tray is clipped by the bottom edge;
+    // too large and there is dead glass under it.
+    L"MenuHeight=150",
+    // How far the glass is pulled up off the bottom of the layout box, as a
+    // Margin: left,top,right,bottom.
+    //
+    // Roughly $MenuHeight + $TrayShiftY of the box is actually on screen --
+    // that is what TrayShiftY is really compensating for: the tray was parked
+    // in the strip below the visible area. A background cannot be shifted into
+    // view the way the tray can, so the glass is inset instead, which brings
+    // its rounded bottom corners back on screen.
+    //
+    // The bottom number should match -$TrayShiftY. Raise it if the corners are
+    // still square, lower it if there is now a gap under the tray.
+    L"PanelInset=0,0,0,30",
+    L"SearchHeight=40",
+    L"TrayHeight=56",
+    // LiquidGlass's own $BorderThickness is 0.3,1,0.3,0.3 -- a bright top
+    // edge and a faint everything-else. The bottom is raised to match the
+    // top so the bottom corners look like the top pair. Set this back to
+    // $BorderThickness's value for LiquidGlass's original asymmetry.
+    L"PanelBorderThickness=0.3,1,0.3,1",
+    // Negative moves the whole search + tray stack UP. Use this to take out
+    // dead space above the search box, then lower MenuHeight to match.
+    L"ContentShiftY=0",
+    // Positive moves the search box DOWN.
+    L"SearchShiftY=0",
+    // Positive moves the profile + power tray DOWN, negative pulls it back up
+    // if it is still clipped by the bottom edge.
+    L"TrayShiftY=-30",
+}, {}, {
+    ThemeTargetStyles{L"*", {
+        L"transition: background-color 0.083s ease-in-out !important"}},
+}, DisableNewStartMenuLayout::forceNewLayout};
+
 const Theme g_themeWindows10X = {{
     ThemeTargetStyles{L"Grid#ShowMoreSuggestions", {
         L"Visibility=1"}},
@@ -8476,6 +9307,9 @@ using namespace std::string_view_literals;
 
 #include <commctrl.h>
 #include <d2d1_1.h>
+#include <pdh.h>
+#include <pdhmsg.h>
+#include <psapi.h>
 #include <roapi.h>
 #include <windows.graphics.effects.h>
 #include <winstring.h>
@@ -14690,6 +15524,1491 @@ void HandleSeparatePinnedScroll(FrameworkElement element) {
     }
 }
 
+// ######################################################################
+// Fork: Start menu system information panel
+//
+// The search-only themes empty the middle of the Start menu and leave it as
+// glass. This fills that space with a Task Manager "Performance" style
+// readout: text only, label on the left, live value on the right.
+//
+// ---- where it goes ----
+//
+// The panel is added as a *sibling* of the element the theme collapsed, and
+// copies that element's Grid.Row / Grid.RowSpan / Grid.Column /
+// Grid.ColumnSpan. So it lands in exactly the slot the app content vacated,
+// with the search box still above it and the profile picture + power button
+// still below it, and no row index is hardcoded anywhere. The anchor is
+// Frame#StartFrame in the redesigned layout and Grid#UndockedRoot in the
+// classic one -- the same two elements the search-only themes collapse.
+//
+// Collapsing the anchor is what makes room; the panel does not depend on it.
+// With a theme that leaves the app content visible the panel would be drawn
+// over the top of it, which is why it is off by default.
+//
+// ---- how it updates ----
+//
+// One background thread samples on an interval and pushes a snapshot of
+// preformatted strings to the UI thread via the panel's CoreDispatcher. All
+// the measuring, arithmetic and string building happens off the UI thread;
+// the dispatcher callback only assigns Text. The thread skips sampling
+// entirely while the Start menu's CoreWindow is hidden, which is nearly all
+// the time, so a closed Start menu costs one wait per interval and nothing
+// else.
+//
+// ---- styling ----
+//
+// Every element is named, so the styler can theme the panel with ordinary
+// target rules like any native element:
+//
+//   Grid#WhSysInfoRoot          the panel, fills the vacated slot
+//   StackPanel#WhSysInfoSection one component (CPU, Memory, ...)
+//   TextBlock#WhSysInfoHeader   that component's heading
+//   Grid#WhSysInfoRow           one label/value pair
+//   TextBlock#WhSysInfoLabel    the left-hand label
+//   TextBlock#WhSysInfoValue    the right-hand value
+// ######################################################################
+
+namespace sysinfo {
+
+// ---------------------------------------------------------------- settings
+
+struct Config {
+    bool enabled = false;
+    bool cpu = true;
+    bool memory = true;
+    bool disk = true;
+    bool network = true;
+    bool gpu = false;
+    int columns = 2;
+    int intervalMs = 1000;
+    double fontSize = 12;
+    std::wstring diskRoot = L"C:\\";
+    std::wstring diskLabel = L"C:";
+    Thickness padding{28, 8, 28, 8};
+};
+
+Config g_cfg;
+
+// "l,t,r,b" or a single number for all four. Anything unparseable keeps the
+// fallback rather than half-applying.
+Thickness ParseThicknessSetting(PCWSTR str, Thickness fallback) {
+    if (!str || !*str) {
+        return fallback;
+    }
+
+    double parts[4];
+    int count = 0;
+    const WCHAR* p = str;
+    while (count < 4) {
+        WCHAR* end = nullptr;
+        double value = wcstod(p, &end);
+        if (end == p) {
+            break;
+        }
+        parts[count++] = value;
+        p = end;
+        while (*p == L' ') {
+            p++;
+        }
+        if (*p == L',') {
+            p++;
+        } else {
+            break;
+        }
+    }
+
+    if (count == 1) {
+        return Thickness{parts[0], parts[0], parts[0], parts[0]};
+    }
+    if (count == 4) {
+        return Thickness{parts[0], parts[1], parts[2], parts[3]};
+    }
+    return fallback;
+}
+
+void LoadConfig() {
+    g_cfg.enabled = Wh_GetIntSetting(L"sysInfoEnabled") != 0;
+    g_cfg.cpu = Wh_GetIntSetting(L"sysInfoCpu") != 0;
+    g_cfg.memory = Wh_GetIntSetting(L"sysInfoMemory") != 0;
+    g_cfg.disk = Wh_GetIntSetting(L"sysInfoDisk") != 0;
+    g_cfg.network = Wh_GetIntSetting(L"sysInfoNetwork") != 0;
+    g_cfg.gpu = Wh_GetIntSetting(L"sysInfoGpu") != 0;
+
+    g_cfg.columns = Wh_GetIntSetting(L"sysInfoColumns");
+    if (g_cfg.columns < 1 || g_cfg.columns > 5) {
+        g_cfg.columns = 2;
+    }
+
+    g_cfg.intervalMs = Wh_GetIntSetting(L"sysInfoIntervalMs");
+    if (g_cfg.intervalMs < 250 || g_cfg.intervalMs > 60000) {
+        g_cfg.intervalMs = 1000;
+    }
+
+    int fontSize = Wh_GetIntSetting(L"sysInfoFontSize");
+    g_cfg.fontSize = (fontSize >= 6 && fontSize <= 40) ? fontSize : 12;
+
+    string_setting_unique_ptr driveSetting(
+        Wh_GetStringSetting(L"sysInfoDiskLetter"));
+    WCHAR drive = (driveSetting && driveSetting[0]) ? driveSetting[0] : L'C';
+    if (drive >= L'a' && drive <= L'z') {
+        drive = drive - L'a' + L'A';
+    }
+    if (drive < L'A' || drive > L'Z') {
+        drive = L'C';
+    }
+    g_cfg.diskRoot = std::wstring(1, drive) + L":\\";
+    g_cfg.diskLabel = std::wstring(1, drive) + L":";
+
+    string_setting_unique_ptr paddingSetting(
+        Wh_GetStringSetting(L"sysInfoPadding"));
+    g_cfg.padding =
+        ParseThicknessSetting(paddingSetting.get(), Thickness{28, 8, 28, 8});
+
+    Wh_Log(L"SysInfo: enabled %d, target %d, redesigned %d, waiting for %s",
+           g_cfg.enabled ? 1 : 0, static_cast<int>(g_target),
+           g_isRedesignedStartMenu ? 1 : 0,
+           g_isRedesignedStartMenu ? L"Frame#StartFrame" : L"Grid#UndockedRoot");
+}
+
+// ------------------------------------------------------------- value slots
+
+// One slot per TextBlock whose text changes. Headers are slots too: the CPU
+// model, the RAM total and the network adapter name all belong in a heading
+// and all of them are discovered at runtime.
+enum Slot {
+    kCpuHeader,
+    kCpuUsage,
+    kCpuSpeed,
+    kCpuProcesses,
+    kCpuThreads,
+    kCpuHandles,
+    kCpuUptime,
+
+    kMemHeader,
+    kMemInUse,
+    kMemAvailable,
+    kMemCommitted,
+    kMemCached,
+    kMemPaged,
+    kMemNonPaged,
+
+    kDiskHeader,
+    kDiskActive,
+    kDiskRead,
+    kDiskWrite,
+    kDiskFree,
+
+    kNetHeader,
+    kNetSend,
+    kNetReceive,
+
+    kGpuHeader,
+    kGpuUsage,
+
+    kSlotCount,
+};
+
+struct Snapshot {
+    std::wstring values[kSlotCount];
+};
+
+// ------------------------------------------------------------- formatting
+
+std::wstring Sprintf(PCWSTR format, ...) {
+    va_list args;
+    va_start(args, format);
+    WCHAR buffer[256];
+    int written = _vsnwprintf_s(buffer, ARRAYSIZE(buffer), _TRUNCATE, format,
+                                args);
+    va_end(args);
+
+    // _TRUNCATE returns -1 when the result did not fit, but still terminates
+    // what it did write -- so measure it rather than discard it.
+    if (written < 0) {
+        return std::wstring(buffer, wcsnlen(buffer, ARRAYSIZE(buffer)));
+    }
+    return std::wstring(buffer, written);
+}
+
+constexpr PCWSTR kUnavailable = L"\u2014";  // em dash
+
+// Binary units with the labels Task Manager uses.
+std::wstring FormatBytes(uint64_t bytes) {
+    constexpr double kKB = 1024.0;
+    constexpr double kMB = kKB * 1024.0;
+    constexpr double kGB = kMB * 1024.0;
+    constexpr double kTB = kGB * 1024.0;
+
+    double value = static_cast<double>(bytes);
+    if (value >= kTB) {
+        return Sprintf(L"%.2f TB", value / kTB);
+    }
+    if (value >= kGB) {
+        return Sprintf(L"%.1f GB", value / kGB);
+    }
+    if (value >= kMB) {
+        return Sprintf(L"%.0f MB", value / kMB);
+    }
+    if (value >= kKB) {
+        return Sprintf(L"%.0f KB", value / kKB);
+    }
+    return Sprintf(L"%llu B", static_cast<unsigned long long>(bytes));
+}
+
+// Disk throughput, in bytes per second -- Task Manager's unit for disks.
+std::wstring FormatByteRate(double bytesPerSecond) {
+    if (bytesPerSecond < 0) {
+        return kUnavailable;
+    }
+
+    constexpr double kKB = 1024.0;
+    constexpr double kMB = kKB * 1024.0;
+    constexpr double kGB = kMB * 1024.0;
+
+    if (bytesPerSecond >= kGB) {
+        return Sprintf(L"%.1f GB/s", bytesPerSecond / kGB);
+    }
+    if (bytesPerSecond >= kMB) {
+        return Sprintf(L"%.1f MB/s", bytesPerSecond / kMB);
+    }
+    if (bytesPerSecond >= kKB) {
+        return Sprintf(L"%.0f KB/s", bytesPerSecond / kKB);
+    }
+    return Sprintf(L"%.0f B/s", bytesPerSecond);
+}
+
+// Network throughput, in bits per second -- Task Manager's unit for network,
+// and the reason a "1 MB/s" download reads as "8 Mbps" here.
+std::wstring FormatBitRate(double bytesPerSecond) {
+    if (bytesPerSecond < 0) {
+        return kUnavailable;
+    }
+
+    double bits = bytesPerSecond * 8.0;
+    if (bits >= 1e9) {
+        return Sprintf(L"%.1f Gbps", bits / 1e9);
+    }
+    if (bits >= 1e6) {
+        return Sprintf(L"%.1f Mbps", bits / 1e6);
+    }
+    if (bits >= 1e3) {
+        return Sprintf(L"%.0f Kbps", bits / 1e3);
+    }
+    return Sprintf(L"%.0f bps", bits);
+}
+
+// Grouped by thousands. Built by hand rather than through a locale so the
+// result does not depend on what the host process happens to have imbued.
+std::wstring FormatCount(uint64_t value) {
+    std::wstring digits = std::to_wstring(value);
+    std::wstring result;
+    result.reserve(digits.size() + digits.size() / 3);
+
+    size_t leading = digits.size() % 3;
+    if (leading == 0) {
+        leading = 3;
+    }
+
+    for (size_t i = 0; i < digits.size(); i++) {
+        if (i == leading) {
+            result += L',';
+            leading += 3;
+        }
+        result += digits[i];
+    }
+    return result;
+}
+
+std::wstring FormatPercent(double percent) {
+    if (percent < 0) {
+        return kUnavailable;
+    }
+    if (percent > 100) {
+        percent = 100;
+    }
+    return Sprintf(L"%.0f%%", percent);
+}
+
+// Task Manager's "d:hh:mm:ss".
+std::wstring FormatUptime(uint64_t milliseconds) {
+    uint64_t totalSeconds = milliseconds / 1000;
+    uint64_t days = totalSeconds / 86400;
+    uint64_t hours = (totalSeconds % 86400) / 3600;
+    uint64_t minutes = (totalSeconds % 3600) / 60;
+    uint64_t seconds = totalSeconds % 60;
+    return Sprintf(L"%llu:%02llu:%02llu:%02llu",
+                   static_cast<unsigned long long>(days),
+                   static_cast<unsigned long long>(hours),
+                   static_cast<unsigned long long>(minutes),
+                   static_cast<unsigned long long>(seconds));
+}
+
+std::wstring TrimSpaces(std::wstring value) {
+    size_t first = value.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) {
+        return {};
+    }
+    size_t last = value.find_last_not_of(L" \t");
+    return value.substr(first, last - first + 1);
+}
+
+// ---------------------------------------------------------------- sampling
+
+// CPU total utilisation from GetSystemTimes deltas. Kernel time already
+// includes idle time, so busy is (kernel + user) - idle over the same window.
+class CpuSampler {
+   public:
+    // Negative until a second sample exists to difference against.
+    double Sample() {
+        FILETIME idleFt, kernelFt, userFt;
+        if (!GetSystemTimes(&idleFt, &kernelFt, &userFt)) {
+            return -1;
+        }
+
+        auto toU64 = [](const FILETIME& ft) -> uint64_t {
+            return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) |
+                   ft.dwLowDateTime;
+        };
+
+        uint64_t idle = toU64(idleFt);
+        uint64_t total = toU64(kernelFt) + toU64(userFt);
+
+        double result = -1;
+        if (m_hasPrevious && total > m_previousTotal &&
+            idle >= m_previousIdle) {
+            double deltaTotal = static_cast<double>(total - m_previousTotal);
+            double deltaIdle = static_cast<double>(idle - m_previousIdle);
+            result = (1.0 - deltaIdle / deltaTotal) * 100.0;
+            if (result < 0) {
+                result = 0;
+            }
+        }
+
+        m_previousIdle = idle;
+        m_previousTotal = total;
+        m_hasPrevious = true;
+        return result;
+    }
+
+   private:
+    uint64_t m_previousIdle = 0;
+    uint64_t m_previousTotal = 0;
+    bool m_hasPrevious = false;
+};
+
+// powrprof's ProcessorInformation, for the "Speed" row. Declared locally and
+// resolved with GetProcAddress so the mod needs neither the header nor the
+// import library.
+struct ProcessorPowerInformation {
+    ULONG Number;
+    ULONG MaxMhz;
+    ULONG CurrentMhz;
+    ULONG MhzLimit;
+    ULONG MaxIdleState;
+    ULONG CurrentIdleState;
+};
+
+using CallNtPowerInformation_t =
+    LONG(WINAPI*)(int informationLevel,
+                  PVOID inputBuffer,
+                  ULONG inputBufferLength,
+                  PVOID outputBuffer,
+                  ULONG outputBufferLength);
+
+// Mean current clock across logical processors, in MHz. Zero if unavailable.
+double SampleCpuMhz() {
+    static CallNtPowerInformation_t callNtPowerInformation = []() {
+        HMODULE module = LoadLibraryEx(L"powrprof.dll", nullptr,
+                                       LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return module ? reinterpret_cast<CallNtPowerInformation_t>(
+                            GetProcAddress(module, "CallNtPowerInformation"))
+                      : nullptr;
+    }();
+
+    if (!callNtPowerInformation) {
+        return 0.0;
+    }
+
+    static const DWORD count = []() {
+        SYSTEM_INFO systemInfo;
+        GetSystemInfo(&systemInfo);
+        return systemInfo.dwNumberOfProcessors;
+    }();
+    if (count == 0) {
+        return 0.0;
+    }
+
+    std::vector<ProcessorPowerInformation> info(count);
+    constexpr int kProcessorInformation = 11;
+    LONG status = callNtPowerInformation(
+        kProcessorInformation, nullptr, 0, info.data(),
+        static_cast<ULONG>(info.size() * sizeof(info[0])));
+    if (status != 0) {
+        return 0.0;
+    }
+
+    double total = 0;
+    for (const auto& entry : info) {
+        total += entry.CurrentMhz;
+    }
+    return total / count;
+}
+
+std::wstring ReadCpuName() {
+    HKEY key;
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+                     L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0,
+                     KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+        return {};
+    }
+
+    WCHAR buffer[128];
+    DWORD size = sizeof(buffer);
+    DWORD type = 0;
+    std::wstring name;
+    if (RegQueryValueEx(key, L"ProcessorNameString", nullptr, &type,
+                        reinterpret_cast<LPBYTE>(buffer),
+                        &size) == ERROR_SUCCESS &&
+        (type == REG_SZ || type == REG_EXPAND_SZ)) {
+        name.assign(buffer, wcsnlen(buffer, ARRAYSIZE(buffer)));
+    }
+    RegCloseKey(key);
+
+    // "(R)" and "(TM)" cost a lot of width and say nothing.
+    for (PCWSTR noise : {L"(R)", L"(TM)", L"(r)", L"(tm)"}) {
+        for (size_t pos = name.find(noise); pos != std::wstring::npos;
+             pos = name.find(noise)) {
+            name.erase(pos, wcslen(noise));
+        }
+    }
+    return TrimSpaces(std::move(name));
+}
+
+// The disk, network and GPU numbers all come from performance counters.
+// PdhAddEnglishCounter is what makes the counter paths below safe on a
+// localised Windows -- the display names are translated, the English names
+// are not.
+class PerfCounters {
+   public:
+    // pdhmsg.h spells this DWORD while every PDH function returns a signed
+    // PDH_STATUS, so comparing the two as-is warns.
+    static constexpr PDH_STATUS kMoreData =
+        static_cast<PDH_STATUS>(PDH_MORE_DATA);
+
+    void Open() {
+        if (m_query) {
+            return;
+        }
+
+        if (PdhOpenQuery(nullptr, 0, &m_query) != ERROR_SUCCESS) {
+            m_query = nullptr;
+            return;
+        }
+
+        if (g_cfg.disk) {
+            AddCounter(L"\\PhysicalDisk(_Total)\\% Disk Time", &m_diskActive);
+            AddCounter(L"\\PhysicalDisk(_Total)\\Disk Read Bytes/sec",
+                       &m_diskRead);
+            AddCounter(L"\\PhysicalDisk(_Total)\\Disk Write Bytes/sec",
+                       &m_diskWrite);
+        }
+        if (g_cfg.network) {
+            AddCounter(L"\\Network Interface(*)\\Bytes Sent/sec", &m_netSent);
+            AddCounter(L"\\Network Interface(*)\\Bytes Received/sec",
+                       &m_netReceived);
+        }
+        if (g_cfg.gpu) {
+            AddCounter(L"\\GPU Engine(*engtype_3D)\\Utilization Percentage",
+                       &m_gpu);
+        }
+    }
+
+    void Close() {
+        if (m_query) {
+            PdhCloseQuery(m_query);
+            m_query = nullptr;
+        }
+        m_diskActive = m_diskRead = m_diskWrite = nullptr;
+        m_netSent = m_netReceived = nullptr;
+        m_gpu = nullptr;
+        m_collected = 0;
+    }
+
+    // Rate counters need two collections before they mean anything, and
+    // wildcard counters do not enumerate their instances until the first one.
+    void Collect() {
+        if (!m_query) {
+            return;
+        }
+        if (PdhCollectQueryData(m_query) == ERROR_SUCCESS &&
+            m_collected < 2) {
+            m_collected++;
+        }
+    }
+
+    bool Ready() const { return m_query && m_collected >= 2; }
+
+    double DiskActive() const { return Single(m_diskActive); }
+    double DiskRead() const { return Single(m_diskRead); }
+    double DiskWrite() const { return Single(m_diskWrite); }
+
+    // Sum across every 3D engine instance. Task Manager's headline GPU figure
+    // is the busiest engine rather than the sum, but summing 3D matches what
+    // people actually look at that number for and needs no engine taxonomy.
+    double Gpu() const {
+        double total = 0;
+        if (!SumArray(m_gpu, nullptr, &total, nullptr)) {
+            return -1;
+        }
+        return total > 100 ? 100 : total;
+    }
+
+    // Task Manager reports the adapter you are actually using, not a sum over
+    // every tunnel and loopback the machine has. So does this: the busiest
+    // non-pseudo instance wins, and its name becomes the heading.
+    void Network(double* sent, double* received, std::wstring* adapter) const {
+        *sent = -1;
+        *received = -1;
+
+        std::wstring busiestName;
+        double busiestReceived = -1;
+        if (!SumArray(m_netReceived, &busiestName, nullptr,
+                      &busiestReceived)) {
+            return;
+        }
+
+        *received = busiestReceived;
+        *adapter = busiestName;
+
+        // Match the same instance on the send counter rather than taking its
+        // own busiest, so both rows describe one adapter.
+        double sentForInstance = 0;
+        if (InstanceValue(m_netSent, busiestName, &sentForInstance)) {
+            *sent = sentForInstance;
+        }
+    }
+
+   private:
+    void AddCounter(PCWSTR path, PDH_HCOUNTER* counter) {
+        if (PdhAddEnglishCounter(m_query, path, 0, counter) != ERROR_SUCCESS) {
+            *counter = nullptr;
+        }
+    }
+
+    double Single(PDH_HCOUNTER counter) const {
+        if (!Ready() || !counter) {
+            return -1;
+        }
+        PDH_FMT_COUNTERVALUE value{};
+        if (PdhGetFormattedCounterValue(counter, PDH_FMT_DOUBLE, nullptr,
+                                        &value) != ERROR_SUCCESS ||
+            value.CStatus != ERROR_SUCCESS) {
+            return -1;
+        }
+        return value.doubleValue;
+    }
+
+    // Walks a wildcard counter's instances once, and hands back whichever of
+    // the three answers the caller asked for: the busiest instance's name,
+    // the sum over all instances, the busiest instance's value.
+    bool SumArray(PDH_HCOUNTER counter,
+                  std::wstring* busiestName,
+                  double* sum,
+                  double* busiestValue) const {
+        if (!Ready() || !counter) {
+            return false;
+        }
+
+        DWORD bufferSize = 0;
+        DWORD itemCount = 0;
+        PDH_STATUS status = PdhGetFormattedCounterArray(
+            counter, PDH_FMT_DOUBLE, &bufferSize, &itemCount, nullptr);
+        if (status != kMoreData || bufferSize == 0) {
+            return false;
+        }
+
+        std::vector<BYTE> buffer(bufferSize);
+        auto* items =
+            reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM*>(buffer.data());
+        if (PdhGetFormattedCounterArray(counter, PDH_FMT_DOUBLE, &bufferSize,
+                                        &itemCount,
+                                        items) != ERROR_SUCCESS) {
+            return false;
+        }
+
+        double totalValue = 0;
+        double bestValue = -1;
+        PCWSTR bestName = nullptr;
+
+        for (DWORD i = 0; i < itemCount; i++) {
+            if (items[i].FmtValue.CStatus != ERROR_SUCCESS) {
+                continue;
+            }
+            if (busiestName && IsPseudoAdapter(items[i].szName)) {
+                continue;
+            }
+
+            double value = items[i].FmtValue.doubleValue;
+            totalValue += value;
+            if (value > bestValue) {
+                bestValue = value;
+                bestName = items[i].szName;
+            }
+        }
+
+        if (bestValue < 0) {
+            return false;
+        }
+
+        if (busiestName && bestName) {
+            *busiestName = bestName;
+        }
+        if (sum) {
+            *sum = totalValue;
+        }
+        if (busiestValue) {
+            *busiestValue = bestValue;
+        }
+        return true;
+    }
+
+    bool InstanceValue(PDH_HCOUNTER counter,
+                       const std::wstring& instance,
+                       double* out) const {
+        if (!Ready() || !counter) {
+            return false;
+        }
+
+        DWORD bufferSize = 0;
+        DWORD itemCount = 0;
+        if (PdhGetFormattedCounterArray(counter, PDH_FMT_DOUBLE, &bufferSize,
+                                        &itemCount,
+                                        nullptr) != kMoreData ||
+            bufferSize == 0) {
+            return false;
+        }
+
+        std::vector<BYTE> buffer(bufferSize);
+        auto* items =
+            reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM*>(buffer.data());
+        if (PdhGetFormattedCounterArray(counter, PDH_FMT_DOUBLE, &bufferSize,
+                                        &itemCount,
+                                        items) != ERROR_SUCCESS) {
+            return false;
+        }
+
+        for (DWORD i = 0; i < itemCount; i++) {
+            if (items[i].FmtValue.CStatus == ERROR_SUCCESS &&
+                instance == items[i].szName) {
+                *out = items[i].FmtValue.doubleValue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Loopback, tunnelling and virtual-filter instances carry traffic that no
+    // one means when they say "network".
+    static bool IsPseudoAdapter(PCWSTR name) {
+        if (!name) {
+            return true;
+        }
+        for (PCWSTR marker : {L"Loopback", L"isatap", L"Teredo", L"Pseudo",
+                              L"QoS Packet Scheduler", L"Filter"}) {
+            if (wcsstr(name, marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    PDH_HQUERY m_query = nullptr;
+    PDH_HCOUNTER m_diskActive = nullptr;
+    PDH_HCOUNTER m_diskRead = nullptr;
+    PDH_HCOUNTER m_diskWrite = nullptr;
+    PDH_HCOUNTER m_netSent = nullptr;
+    PDH_HCOUNTER m_netReceived = nullptr;
+    PDH_HCOUNTER m_gpu = nullptr;
+    int m_collected = 0;
+};
+
+// Builds one complete set of strings. Runs on the sampler thread only.
+class Sampler {
+   public:
+    void Start() {
+        m_counters.Open();
+        m_cpuName = ReadCpuName();
+    }
+
+    void Stop() { m_counters.Close(); }
+
+    Snapshot Take() {
+        Snapshot snapshot;
+        m_counters.Collect();
+
+        if (g_cfg.cpu || g_cfg.memory) {
+            SamplePerformanceInfo();
+        }
+
+        if (g_cfg.cpu) {
+            FillCpuSection(&snapshot);
+        }
+        if (g_cfg.memory) {
+            FillMemorySection(&snapshot);
+        }
+        if (g_cfg.disk) {
+            FillDiskSection(&snapshot);
+        }
+        if (g_cfg.network) {
+            FillNetworkSection(&snapshot);
+        }
+        if (g_cfg.gpu) {
+            FillGpuSection(&snapshot);
+        }
+
+        return snapshot;
+    }
+
+   private:
+    // The CPU and Memory sections both draw on this, so it is sampled once
+    // per tick and shared rather than fetched twice.
+    void SamplePerformanceInfo() {
+        m_performance = {};
+        m_performance.cb = sizeof(m_performance);
+        m_hasPerformance =
+            GetPerformanceInfo(&m_performance, sizeof(m_performance)) != FALSE;
+    }
+
+    void FillCpuSection(Snapshot* snapshot) {
+        snapshot->values[kCpuHeader] =
+            m_cpuName.empty() ? L"CPU" : L"CPU  \u00b7  " + m_cpuName;
+        snapshot->values[kCpuUsage] = FormatPercent(m_cpu.Sample());
+
+        double mhz = SampleCpuMhz();
+        snapshot->values[kCpuSpeed] =
+            mhz > 0 ? Sprintf(L"%.2f GHz", mhz / 1000.0) : kUnavailable;
+
+        if (m_hasPerformance) {
+            snapshot->values[kCpuProcesses] =
+                FormatCount(m_performance.ProcessCount);
+            snapshot->values[kCpuThreads] =
+                FormatCount(m_performance.ThreadCount);
+            snapshot->values[kCpuHandles] =
+                FormatCount(m_performance.HandleCount);
+        } else {
+            snapshot->values[kCpuProcesses] = kUnavailable;
+            snapshot->values[kCpuThreads] = kUnavailable;
+            snapshot->values[kCpuHandles] = kUnavailable;
+        }
+
+        snapshot->values[kCpuUptime] = FormatUptime(GetTickCount64());
+    }
+
+    void FillMemorySection(Snapshot* snapshot) {
+        MEMORYSTATUSEX memory{};
+        memory.dwLength = sizeof(memory);
+        if (!GlobalMemoryStatusEx(&memory)) {
+            snapshot->values[kMemHeader] = L"Memory";
+            return;
+        }
+
+        uint64_t inUse = memory.ullTotalPhys - memory.ullAvailPhys;
+        double percent = memory.ullTotalPhys
+                             ? (100.0 * inUse / memory.ullTotalPhys)
+                             : 0;
+
+        snapshot->values[kMemHeader] =
+            L"Memory  \u00b7  " + FormatBytes(memory.ullTotalPhys);
+        snapshot->values[kMemInUse] =
+            FormatBytes(inUse) + Sprintf(L"  (%.0f%%)", percent);
+        snapshot->values[kMemAvailable] = FormatBytes(memory.ullAvailPhys);
+
+        if (m_hasPerformance) {
+            uint64_t pageSize = m_performance.PageSize;
+            snapshot->values[kMemCommitted] =
+                FormatBytes(m_performance.CommitTotal * pageSize) + L" / " +
+                FormatBytes(m_performance.CommitLimit * pageSize);
+            snapshot->values[kMemCached] =
+                FormatBytes(m_performance.SystemCache * pageSize);
+            snapshot->values[kMemPaged] =
+                FormatBytes(m_performance.KernelPaged * pageSize);
+            snapshot->values[kMemNonPaged] =
+                FormatBytes(m_performance.KernelNonpaged * pageSize);
+        } else {
+            snapshot->values[kMemCommitted] = kUnavailable;
+            snapshot->values[kMemCached] = kUnavailable;
+            snapshot->values[kMemPaged] = kUnavailable;
+            snapshot->values[kMemNonPaged] = kUnavailable;
+        }
+    }
+
+    void FillDiskSection(Snapshot* snapshot) {
+        snapshot->values[kDiskHeader] = L"Disk";
+        snapshot->values[kDiskActive] =
+            FormatPercent(m_counters.DiskActive());
+        snapshot->values[kDiskRead] = FormatByteRate(m_counters.DiskRead());
+        snapshot->values[kDiskWrite] = FormatByteRate(m_counters.DiskWrite());
+
+        // Free space barely moves, so it is polled far more slowly than the
+        // throughput counters next to it.
+        if (m_freeSpaceCountdown == 0) {
+            ULARGE_INTEGER available{}, total{}, free{};
+            if (GetDiskFreeSpaceEx(g_cfg.diskRoot.c_str(), &available, &total,
+                                   &free)) {
+                m_diskFree = FormatBytes(free.QuadPart) + L" of " +
+                             FormatBytes(total.QuadPart);
+            } else {
+                m_diskFree = kUnavailable;
+            }
+            m_freeSpaceCountdown = kFreeSpaceInterval;
+        }
+        m_freeSpaceCountdown--;
+
+        snapshot->values[kDiskFree] = m_diskFree;
+    }
+
+    void FillNetworkSection(Snapshot* snapshot) {
+        double sent = -1;
+        double received = -1;
+        std::wstring adapter;
+        m_counters.Network(&sent, &received, &adapter);
+
+        snapshot->values[kNetHeader] =
+            adapter.empty() ? L"Network" : L"Network  \u00b7  " + adapter;
+        snapshot->values[kNetSend] = FormatBitRate(sent);
+        snapshot->values[kNetReceive] = FormatBitRate(received);
+    }
+
+    void FillGpuSection(Snapshot* snapshot) {
+        snapshot->values[kGpuHeader] = L"GPU";
+        snapshot->values[kGpuUsage] = FormatPercent(m_counters.Gpu());
+    }
+
+    static constexpr int kFreeSpaceInterval = 10;
+
+    CpuSampler m_cpu;
+    PerfCounters m_counters;
+    PERFORMANCE_INFORMATION m_performance{};
+    bool m_hasPerformance = false;
+    std::wstring m_cpuName;
+    std::wstring m_diskFree = kUnavailable;
+    int m_freeSpaceCountdown = 0;
+};
+
+// ------------------------------------------------------------------- panel
+
+struct Panel {
+    // The panel's own lifetime signal. This one is a weak_ref because it is
+    // exactly the question being asked: is the tree we were added to gone?
+    winrt::weak_ref<Controls::Grid> root;
+
+    // The value TextBlocks, held *strongly*.
+    //
+    // These were weak_refs, and every one of them failed to resolve for the
+    // life of the panel -- the log read `slots 0/22` while the same snapshot
+    // carried a perfectly good cpu='20%', and while the panel's own root Grid
+    // resolved from its weak_ref without trouble. XAML is free to release an
+    // element's projected peer while the visual tree goes on holding the core
+    // element alive, so a weak reference to a child can go permanently
+    // unresolvable while that child is still on screen. Updates then compute
+    // correctly and get written to nothing, which looks exactly like a sampler
+    // that is not running.
+    //
+    // Holding them strongly cannot leak: the whole Panel is dropped as soon as
+    // `root` stops resolving, which releases them. Note the explicit
+    // `TextBlock{nullptr}` fill -- a default-constructed projected type
+    // *activates* a real TextBlock, which is not what an empty slot means.
+    std::vector<Controls::TextBlock> slots =
+        std::vector<Controls::TextBlock>(kSlotCount,
+                                         Controls::TextBlock{nullptr});
+
+    // Held strongly: XamlRoot is not a DependencyObject, and the token below
+    // is only revocable through the same object that issued it.
+    XamlRoot xamlRoot{nullptr};
+    winrt::event_token visibilityToken{};
+};
+
+std::vector<Panel> g_panels;
+
+// Whether the Start menu is actually on screen, maintained on the UI thread
+// from XamlRoot::IsHostVisible and read by the sampler thread.
+//
+// It defaults to *true* on purpose. An earlier version gated the sampler on
+// finding a Windows.UI.Core.CoreWindow for the process, which on build 26200
+// does not exist -- StartMenuExperienceHost has no top-level window at all,
+// open or closed -- so the gate never opened and the panel never showed a
+// single number. A visibility check that cannot answer must fall back to
+// sampling, never to skipping: the cost of being wrong is a little wasted work
+// per second, and the cost of the alternative is the whole feature.
+std::atomic<bool> g_hostVisible{true};
+
+// Set the first time IsHostVisible answers true. Until then the signal is
+// treated as unproven and the sampler ignores it entirely, so a host that
+// always reports false -- or one whose notion of "host" does not correspond to
+// the menu being on screen -- degrades to sampling always rather than to
+// showing nothing. Only a signal that has demonstrably gone up can be trusted
+// to bring the sampler back when it goes down again.
+std::atomic<bool> g_visibilityProven{false};
+
+// Record a visibility reading, promoting the signal to trusted on the first
+// positive one.
+void NoteHostVisible(bool visible) {
+    if (visible) {
+        g_visibilityProven.store(true, std::memory_order_relaxed);
+    }
+    g_hostVisible.store(visible, std::memory_order_relaxed);
+}
+winrt::Windows::UI::Core::CoreDispatcher g_dispatcher{nullptr};
+std::vector<winrt::Windows::Foundation::IAsyncOperation<bool>> g_pendingActions;
+
+HANDLE g_samplerThread = nullptr;
+HANDLE g_samplerStopEvent = nullptr;
+
+// Bumped on every teardown. A snapshot that was already in flight when the
+// panel went away carries the old value and is dropped on arrival.
+std::atomic<uint32_t> g_generation;
+
+Media::Brush LookupBrush(PCWSTR key, uint8_t fallbackAlpha) {
+    try {
+        auto resources = Application::Current().Resources();
+        auto boxedKey = winrt::box_value(winrt::hstring(key));
+        if (resources.HasKey(boxedKey)) {
+            if (auto brush = resources.Lookup(boxedKey).try_as<Media::Brush>()) {
+                return brush;
+            }
+        }
+    } catch (...) {
+        Wh_Log(L"SysInfo: resource lookup for %s failed %08X", key,
+               winrt::to_hresult());
+    }
+
+    return Media::SolidColorBrush(
+        winrt::Windows::UI::Color{fallbackAlpha, 255, 255, 255});
+}
+
+Controls::TextBlock MakeTextBlock(PCWSTR name,
+                                  double fontSize,
+                                  Media::Brush foreground) {
+    Controls::TextBlock text;
+    text.Name(name);
+    text.FontSize(fontSize);
+    text.Foreground(foreground);
+    text.TextTrimming(TextTrimming::CharacterEllipsis);
+    text.TextWrapping(TextWrapping::NoWrap);
+    text.IsTextSelectionEnabled(false);
+    return text;
+}
+
+// One "Label ......... value" line. A two-column Grid rather than a
+// StackPanel so every value in a section shares a right edge.
+Controls::Grid BuildRow(PCWSTR label, Slot slot, Panel* panel) {
+    Controls::Grid row;
+    row.Name(L"WhSysInfoRow");
+
+    Controls::ColumnDefinition labelColumn;
+    labelColumn.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    Controls::ColumnDefinition valueColumn;
+    valueColumn.Width(GridLengthHelper::Auto());
+    row.ColumnDefinitions().Append(labelColumn);
+    row.ColumnDefinitions().Append(valueColumn);
+
+    auto labelText = MakeTextBlock(L"WhSysInfoLabel", g_cfg.fontSize,
+                                   LookupBrush(L"TextFillColorSecondaryBrush",
+                                               0x99));
+    labelText.Text(label);
+    Controls::Grid::SetColumn(labelText, 0);
+    row.Children().Append(labelText);
+
+    auto valueText = MakeTextBlock(L"WhSysInfoValue", g_cfg.fontSize,
+                                   LookupBrush(L"TextFillColorPrimaryBrush",
+                                               0xFF));
+    valueText.Text(kUnavailable);
+    valueText.TextAlignment(TextAlignment::Right);
+    valueText.Margin(Thickness{12, 0, 0, 0});
+    Controls::Grid::SetColumn(valueText, 1);
+    row.Children().Append(valueText);
+
+    panel->slots[slot] = valueText;
+    return row;
+}
+
+Controls::StackPanel BuildSection(
+    Slot headerSlot,
+    PCWSTR headerFallback,
+    std::initializer_list<std::pair<PCWSTR, Slot>> rows,
+    Panel* panel) {
+    Controls::StackPanel section;
+    section.Name(L"WhSysInfoSection");
+    section.Orientation(Controls::Orientation::Vertical);
+    section.Margin(Thickness{0, 0, 24, 16});
+
+    auto header = MakeTextBlock(L"WhSysInfoHeader", g_cfg.fontSize + 1,
+                                LookupBrush(L"TextFillColorPrimaryBrush",
+                                            0xFF));
+    header.Text(headerFallback);
+    header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+    header.Margin(Thickness{0, 0, 0, 4});
+    section.Children().Append(header);
+    panel->slots[headerSlot] = header;
+
+    for (const auto& [label, slot] : rows) {
+        section.Children().Append(BuildRow(label, slot, panel));
+    }
+
+    return section;
+}
+
+Controls::Grid BuildPanel(Panel* panel) {
+    Controls::Grid root;
+    root.Name(L"WhSysInfoRoot");
+    root.Margin(g_cfg.padding);
+    root.HorizontalAlignment(HorizontalAlignment::Stretch);
+    root.VerticalAlignment(VerticalAlignment::Center);
+
+    std::vector<Controls::StackPanel> sections;
+
+    if (g_cfg.cpu) {
+        sections.push_back(BuildSection(kCpuHeader, L"CPU",
+                                        {{L"Utilization", kCpuUsage},
+                                         {L"Speed", kCpuSpeed},
+                                         {L"Processes", kCpuProcesses},
+                                         {L"Threads", kCpuThreads},
+                                         {L"Handles", kCpuHandles},
+                                         {L"Up time", kCpuUptime}},
+                                        panel));
+    }
+    if (g_cfg.memory) {
+        sections.push_back(BuildSection(kMemHeader, L"Memory",
+                                        {{L"In use", kMemInUse},
+                                         {L"Available", kMemAvailable},
+                                         {L"Committed", kMemCommitted},
+                                         {L"Cached", kMemCached},
+                                         {L"Paged pool", kMemPaged},
+                                         {L"Non-paged pool", kMemNonPaged}},
+                                        panel));
+    }
+    if (g_cfg.disk) {
+        sections.push_back(
+            BuildSection(kDiskHeader, L"Disk",
+                         {{L"Active time", kDiskActive},
+                          {L"Read", kDiskRead},
+                          {L"Write", kDiskWrite},
+                          {g_cfg.diskLabel.c_str(), kDiskFree}},
+                         panel));
+    }
+    if (g_cfg.network) {
+        sections.push_back(BuildSection(kNetHeader, L"Network",
+                                        {{L"Send", kNetSend},
+                                         {L"Receive", kNetReceive}},
+                                        panel));
+    }
+    if (g_cfg.gpu) {
+        sections.push_back(BuildSection(kGpuHeader, L"GPU",
+                                        {{L"Utilization (3D)", kGpuUsage}},
+                                        panel));
+    }
+
+    if (sections.empty()) {
+        return nullptr;
+    }
+
+    int columns = g_cfg.columns;
+    if (columns > static_cast<int>(sections.size())) {
+        columns = static_cast<int>(sections.size());
+    }
+    int rows = (static_cast<int>(sections.size()) + columns - 1) / columns;
+
+    for (int i = 0; i < columns; i++) {
+        Controls::ColumnDefinition column;
+        column.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+        root.ColumnDefinitions().Append(column);
+    }
+    for (int i = 0; i < rows; i++) {
+        Controls::RowDefinition row;
+        row.Height(GridLengthHelper::Auto());
+        root.RowDefinitions().Append(row);
+    }
+
+    for (size_t i = 0; i < sections.size(); i++) {
+        int column = static_cast<int>(i) % columns;
+        int row = static_cast<int>(i) / columns;
+
+        // The gutter belongs between columns, not after the last one, where it
+        // would pull the whole panel off-centre against its own padding.
+        if (column == columns - 1) {
+            auto margin = sections[i].Margin();
+            margin.Right = 0;
+            sections[i].Margin(margin);
+        }
+
+        Controls::Grid::SetColumn(sections[i], column);
+        Controls::Grid::SetRow(sections[i], row);
+        root.Children().Append(sections[i]);
+    }
+
+    panel->root = winrt::make_weak(root);
+    return root;
+}
+
+// Unhook the visibility handler. Safe to call twice; the token is cleared.
+void ReleasePanel(Panel& panel) {
+    if (panel.xamlRoot && panel.visibilityToken) {
+        try {
+            panel.xamlRoot.Changed(panel.visibilityToken);
+        } catch (winrt::hresult_error const& ex) {
+            Wh_Log(L"SysInfo: error unhooking visibility %08X", ex.code());
+        }
+    }
+    panel.visibilityToken = {};
+    panel.xamlRoot = nullptr;
+}
+
+void ApplySnapshot(const Snapshot& snapshot) {
+    std::erase_if(g_panels, [](Panel& panel) {
+        if (panel.root.get()) {
+            return false;
+        }
+        ReleasePanel(panel);
+        return true;
+    });
+
+    int carried = 0;
+    int written = 0;
+
+    for (const auto& panel : g_panels) {
+        for (int i = 0; i < kSlotCount; i++) {
+            if (snapshot.values[i].empty()) {
+                continue;
+            }
+            carried++;
+            const auto& text = panel.slots[i];
+            if (text) {
+                text.Text(snapshot.values[i]);
+                written++;
+            }
+        }
+    }
+
+    // Heartbeat: every application for the first few, then occasionally. It
+    // reports the three things that can each independently produce a panel
+    // full of em dashes -- no panels, dead TextBlock weak refs, or a snapshot
+    // that genuinely has nothing in it -- and prints two real values so the
+    // strings being assigned are visible rather than inferred.
+    static int applications = 0;
+    if (applications < 5 || applications % 30 == 0) {
+        Wh_Log(L"SysInfo: apply #%d, panels %d, slots %d/%d, cpu='%s' "
+               L"mem='%s' hdr='%s'",
+               applications, static_cast<int>(g_panels.size()), written,
+               carried, snapshot.values[kCpuUsage].c_str(),
+               snapshot.values[kMemInUse].c_str(),
+               snapshot.values[kCpuHeader].c_str());
+    }
+    applications++;
+}
+
+// ------------------------------------------------------------------ thread
+
+DWORD WINAPI SamplerThread(LPVOID) {
+    uint32_t generation = g_generation.load();
+    int ticks = 0;
+
+    Sampler sampler;
+    sampler.Start();
+
+    // The counters need one collection to enumerate wildcard instances and a
+    // second to have something to difference against, so the first visible
+    // update is one interval behind. Priming here rather than on first paint
+    // means that cost lands while the Start menu is still closed.
+    sampler.Take();
+
+    for (;;) {
+        if (WaitForSingleObject(g_samplerStopEvent, g_cfg.intervalMs) !=
+            WAIT_TIMEOUT) {
+            break;
+        }
+
+        // The first few ticks are logged unconditionally so that a mod log
+        // shows whether the sampler is running and what it thinks the menu is
+        // doing, without a rebuild and without flooding the log after that.
+        if (ticks < 5 || ticks % 30 == 0) {
+            Wh_Log(L"SysInfo: tick %d, host visible %d (proven %d), "
+                   L"dispatcher %d",
+                   ticks, g_hostVisible.load() ? 1 : 0,
+                   g_visibilityProven.load() ? 1 : 0, g_dispatcher ? 1 : 0);
+        }
+        ticks++;
+
+        // Skipped while the Start menu is off screen, but only once the
+        // visibility signal has proved itself by reporting true at least once.
+        if (g_visibilityProven.load(std::memory_order_relaxed) &&
+            !g_hostVisible.load(std::memory_order_relaxed)) {
+            continue;
+        }
+
+        Snapshot snapshot;
+        try {
+            snapshot = sampler.Take();
+        } catch (...) {
+            Wh_Log(L"SysInfo: sampling failed %08X", winrt::to_hresult());
+            continue;
+        }
+
+        if (!g_dispatcher) {
+            continue;
+        }
+
+        try {
+            g_dispatcher.RunAsync(
+                winrt::Windows::UI::Core::CoreDispatcherPriority::Low,
+                [snapshot = std::move(snapshot), generation]() {
+                    if (g_generation.load() != generation) {
+                        return;
+                    }
+                    try {
+                        ApplySnapshot(snapshot);
+                    } catch (...) {
+                        Wh_Log(L"SysInfo: applying snapshot failed %08X",
+                               winrt::to_hresult());
+                    }
+                });
+        } catch (...) {
+            Wh_Log(L"SysInfo: dispatch failed %08X", winrt::to_hresult());
+        }
+    }
+
+    sampler.Stop();
+    return 0;
+}
+
+void StartSampler() {
+    if (g_samplerThread) {
+        return;
+    }
+
+    g_samplerStopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!g_samplerStopEvent) {
+        Wh_Log(L"SysInfo: could not create the stop event");
+        return;
+    }
+
+    g_samplerThread =
+        CreateThread(nullptr, 0, SamplerThread, nullptr, 0, nullptr);
+    if (!g_samplerThread) {
+        Wh_Log(L"SysInfo: could not start the sampler thread");
+        CloseHandle(g_samplerStopEvent);
+        g_samplerStopEvent = nullptr;
+    }
+}
+
+void StopSampler() {
+    if (!g_samplerThread) {
+        return;
+    }
+
+    SetEvent(g_samplerStopEvent);
+
+    // The thread spends all its time waiting on that event, so this returns
+    // almost immediately. The bound is there so a wedged sampler cannot hang
+    // Start menu teardown.
+    //
+    // On the timeout path the thread is still alive and still waiting on the
+    // stop event, so neither handle can be closed -- freeing the event out
+    // from under a live waiter is worse than leaking it. Both are leaked
+    // together or neither is.
+    if (WaitForSingleObject(g_samplerThread, 5000) == WAIT_OBJECT_0) {
+        CloseHandle(g_samplerThread);
+        CloseHandle(g_samplerStopEvent);
+    } else {
+        Wh_Log(L"SysInfo: the sampler thread did not stop; leaking its handles");
+    }
+
+    g_samplerThread = nullptr;
+    g_samplerStopEvent = nullptr;
+}
+
+// ------------------------------------------------------- tree manipulation
+
+bool IsAnchorName(winrt::hstring const& name) {
+    if (!g_cfg.enabled || g_target != Target::StartMenu) {
+        return false;
+    }
+
+    // The redesigned layout puts the app content in Frame#StartFrame; the
+    // classic one puts it in Grid#UndockedRoot. Both names can exist in the
+    // same tree, so the layout decides which one is the anchor rather than
+    // whichever happens to be reported first.
+    return g_isRedesignedStartMenu ? name == L"StartFrame"
+                                   : name == L"UndockedRoot";
+}
+
+bool PanelAlreadyIn(Controls::Panel parent) {
+    for (const auto& child : parent.Children()) {
+        auto element = child.try_as<FrameworkElement>();
+        if (element && element.Name() == L"WhSysInfoRoot") {
+            return true;
+        }
+    }
+    return false;
+}
+
+void InsertPanelBeside(FrameworkElement anchor) {
+    auto parentObject = Media::VisualTreeHelper::GetParent(anchor);
+    if (!parentObject) {
+        return;
+    }
+
+    auto parent = parentObject.try_as<Controls::Panel>();
+    if (!parent) {
+        Wh_Log(L"SysInfo: the parent of %s is not a Panel, skipping",
+               anchor.Name().c_str());
+        return;
+    }
+
+    if (PanelAlreadyIn(parent)) {
+        return;
+    }
+
+    Panel panel;
+    auto root = BuildPanel(&panel);
+    if (!root) {
+        Wh_Log(L"SysInfo: every section is disabled, nothing to show");
+        return;
+    }
+
+    // Take the anchor's slot rather than assuming one. In a Grid parent these
+    // attached properties are what puts the panel where the app content was;
+    // in any other Panel they are inert and appending is enough.
+    Controls::Grid::SetRow(root, Controls::Grid::GetRow(anchor));
+    Controls::Grid::SetRowSpan(root, Controls::Grid::GetRowSpan(anchor));
+    Controls::Grid::SetColumn(root, Controls::Grid::GetColumn(anchor));
+    Controls::Grid::SetColumnSpan(root, Controls::Grid::GetColumnSpan(anchor));
+
+    parent.Children().Append(root);
+
+    // Track whether the menu is on screen, so the sampler can idle while it is
+    // not. If there is no XamlRoot, or it never raises Changed, g_hostVisible
+    // keeps its default of true and the sampler just runs.
+    if (auto xamlRoot = root.XamlRoot()) {
+        NoteHostVisible(xamlRoot.IsHostVisible());
+        panel.xamlRoot = xamlRoot;
+        panel.visibilityToken = xamlRoot.Changed(
+            [](XamlRoot const& sender, XamlRootChangedEventArgs const&) {
+                NoteHostVisible(sender.IsHostVisible());
+            });
+        Wh_Log(L"SysInfo: tracking host visibility, currently %d",
+               g_hostVisible.load() ? 1 : 0);
+    } else {
+        Wh_Log(L"SysInfo: no XamlRoot; sampling unconditionally");
+    }
+
+    g_panels.push_back(std::move(panel));
+
+    if (!g_dispatcher) {
+        g_dispatcher = anchor.Dispatcher();
+    }
+    StartSampler();
+
+    int wired = 0;
+    for (const auto& slot : g_panels.back().slots) {
+        if (slot) {
+            wired++;
+        }
+    }
+    Wh_Log(L"SysInfo: panel added beside %s, %d/%d slots wired",
+           anchor.Name().c_str(), wired, static_cast<int>(kSlotCount));
+}
+
+void RemoveAllPanels() {
+    g_generation.fetch_add(1);
+
+    for (auto& panel : g_panels) {
+        ReleasePanel(panel);
+
+        try {
+            auto root = panel.root.get();
+            if (!root) {
+                continue;
+            }
+
+            auto parentObject = Media::VisualTreeHelper::GetParent(root);
+            if (!parentObject) {
+                continue;
+            }
+            auto parent = parentObject.try_as<Controls::Panel>();
+            if (!parent) {
+                continue;
+            }
+
+            uint32_t index = 0;
+            if (parent.Children().IndexOf(root, index)) {
+                parent.Children().RemoveAt(index);
+            }
+        } catch (winrt::hresult_error const& ex) {
+            Wh_Log(L"SysInfo: error removing a panel %08X: %s", ex.code(),
+                   ex.message().c_str());
+        }
+    }
+
+    g_panels.clear();
+    g_dispatcher = nullptr;
+    g_hostVisible.store(true, std::memory_order_relaxed);
+    g_visibilityProven.store(false, std::memory_order_relaxed);
+}
+
+void Uninitialize() {
+    StopSampler();
+
+    for (const auto& action : g_pendingActions) {
+        if (action && action.Status() ==
+                          winrt::Windows::Foundation::AsyncStatus::Started) {
+            action.Cancel();
+        }
+    }
+    g_pendingActions.clear();
+
+    RemoveAllPanels();
+}
+
+}  // namespace sysinfo
+
+// Called for every element the visual tree watcher reports. Cheap for all but
+// the one element per Start menu instance that anchors the panel.
+void HandleSysInfoPanel(FrameworkElement element) {
+    if (!sysinfo::IsAnchorName(element.Name())) {
+        return;
+    }
+
+    // Deferred to the next dispatcher tick for the same reason
+    // HandleSeparatePinnedScroll defers: the watcher is still delivering this
+    // element's Add event, and adding a sibling now would re-enter it
+    // mid-mutation.
+    auto action = element.Dispatcher().TryRunAsync(
+        winrt::Windows::UI::Core::CoreDispatcherPriority::Normal,
+        [weakElement = winrt::make_weak(element)]() {
+            auto element = weakElement.get();
+            if (!element) {
+                return;
+            }
+
+            try {
+                sysinfo::InsertPanelBeside(element);
+            } catch (winrt::hresult_error const& ex) {
+                Wh_Log(L"SysInfo error %08X: %s", ex.code(),
+                       ex.message().c_str());
+            }
+        });
+
+    std::erase_if(
+        sysinfo::g_pendingActions,
+        [](winrt::Windows::Foundation::IAsyncOperation<bool> const& a) {
+            return !a || a.Status() !=
+                             winrt::Windows::Foundation::AsyncStatus::Started;
+        });
+    if (action) {
+        sysinfo::g_pendingActions.push_back(std::move(action));
+    }
+}
+
 void ApplyCustomizations(InstanceHandle handle,
                          FrameworkElement element,
                          PCWSTR fallbackClassName) {
@@ -14701,6 +17020,7 @@ void ApplyCustomizations(InstanceHandle handle,
     }
 
     HandleSeparatePinnedScroll(element);
+    HandleSysInfoPanel(element);
 
     if (!g_webContentCss.empty() || !g_webContentJs.empty()) {
         try {
@@ -15688,6 +18008,10 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
         theme = useNewLayoutVariant
                     ? &g_themeTranslucentStartMenu
                     : &g_themeTranslucentStartMenu_variant_ClassicStartMenu;
+    } else if (wcscmp(themeName, L"TranslucentSearchOnly") == 0) {
+        theme = useNewLayoutVariant
+                    ? &g_themeTranslucentSearchOnly
+                    : &g_themeTranslucentSearchOnly_variant_ClassicStartMenu;
     } else if (wcscmp(themeName, L"NoRecommendedSection") == 0) {
         theme = useNewLayoutVariant
                     ? &g_themeNoRecommendedSection
@@ -15768,6 +18092,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
         theme = &g_themeLiquidGlass2;
     } else if (wcscmp(themeName, L"LiquidGlass") == 0) {
         theme = &g_themeLiquidGlass;
+    } else if (wcscmp(themeName, L"LiquidGlassSearchOnly") == 0) {
+        theme = &g_themeLiquidGlassSearchOnly;
     } else if (wcscmp(themeName, L"Windows10X") == 0) {
         theme = useNewLayoutVariant
                     ? &g_themeWindows10X
@@ -15795,6 +18121,8 @@ const Theme* GetSelectedTheme(bool useNewLayoutVariant) {
 }
 
 void ProcessAllStylesFromSettings() {
+    sysinfo::LoadConfig();
+
     const Theme* theme = GetSelectedTheme(g_isRedesignedStartMenu);
 
     StyleConstants styleConstants = LoadStyleConstants(
@@ -15900,6 +18228,8 @@ void UninitializeSettingsAndTap() {
         }
     }
     g_separatePinnedScrollPendingActions.clear();
+
+    sysinfo::Uninitialize();
 
     if (g_allAppsRootRenderTransformVsg) {
         g_allAppsRootRenderTransformVsg.CurrentStateChanged(
@@ -16643,6 +18973,11 @@ void Wh_ModUninit() {
 
     if (g_target == Target::StartMenu) {
         StopStatsTimer();
+
+        // Unconditionally, and not only via UninitializeSettingsAndTap below:
+        // that runs only if a core window is found, and a sampler thread which
+        // outlived the DLL would return into unmapped code.
+        sysinfo::StopSampler();
     }
 
     // Before the UI threads are uninitialized, so that a retry can't be
