@@ -2,7 +2,7 @@
 // @id              virtual-desktop-pager
 // @name            Virtual Desktop Pager
 // @description     A left-hand taskbar pill listing your virtual desktops, click one to switch
-// @version         1.5
+// @version         1.6
 // @author          ashtonlariccia
 // @include         explorer.exe
 // @architecture    x86-64
@@ -35,6 +35,12 @@ desktop's name.
 
 Desktops are still created and closed with the normal Windows shortcuts
 (`Ctrl+Win+D`, `Ctrl+Win+F4`) -- this mod only reflects and switches.
+
+On Windows 11 24H2/25H2 (build 26100+) clicking a chip slides between desktops
+with the same animation as Task View, rather than switching instantly. Turn it
+off with the **Animate desktop switches** setting. Older builds always switch
+instantly -- the animated switch method sits in a part of the shell's private
+interface whose layout is only known for 26100+.
 
 ## Styling
 
@@ -96,6 +102,12 @@ is an escape hatch for when a future build needs a new ID.
     How long to hover a chip before its card appears. Moving between chips
     while a card is already open switches instantly, as Windows tooltips do.
     Set to 0 for no delay.
+- SwitchAnimation: true
+  $name: Animate desktop switches
+  $description: >-
+    Slide between desktops with the same animation you get from the taskbar's
+    Task View, instead of switching instantly. Only available on Windows 11
+    build 26100 and newer (24H2/25H2); older builds always switch instantly.
 - HideWhenSingleDesktop: false
   $name: Hide when there is only one desktop
 - ShowOnSecondaryTaskbars: true
@@ -258,10 +270,22 @@ struct IVirtualDesktop : public IUnknown {
     virtual HRESULT STDMETHODCALLTYPE IsRemote(BOOL*) = 0;
 };
 
-// Only the first seven methods are declared, and nothing past SwitchDesktop is
-// ever called. That prefix has been stable since 22621; the tail of this vtable
-// is where Microsoft keeps adding methods, so staying out of it is what makes
-// this mod survive Windows updates.
+// The prefix through SwitchDesktop (slot 6) has been stable since 22621; the
+// tail is where Microsoft keeps adding methods, so a mod that only ever calls
+// into the prefix survives Windows updates. The pager stays in the prefix for
+// everything except one thing: the animated switch. SwitchDesktopWithAnimation
+// (slot 19) and WaitForAnimationToComplete (slot 21) are what make a switch
+// slide the way Task View does, and they live deep in the tail.
+//
+// Reaching them means declaring every slot up to them, because a vtable index
+// is fixed by declaration order. The intermediate methods are declared only to
+// occupy their slots -- their parameter types are approximate and none of them
+// is ever called, so a wrong signature on, say, CopyDesktopState cannot matter.
+// The slot layout below is the 26100+ (24H2/25H2) one, taken from
+// MScholtes/VirtualDesktop (VirtualDesktop11-24H2). It is NOT the 22621 layout,
+// which is why the animated path is gated to the 26100 interface ID: on 22621
+// slot 19 is some other method entirely, and calling it blind could create or
+// destroy a desktop. See VersionIIDs::animatesSwitch.
 struct IVirtualDesktopManagerInternal : public IUnknown {
     virtual HRESULT STDMETHODCALLTYPE GetCount(UINT*) = 0;
     virtual HRESULT STDMETHODCALLTYPE MoveViewToDesktop(IUnknown*,
@@ -273,6 +297,34 @@ struct IVirtualDesktopManagerInternal : public IUnknown {
                                                          int,
                                                          IVirtualDesktop**) = 0;
     virtual HRESULT STDMETHODCALLTYPE SwitchDesktop(IVirtualDesktop*) = 0;
+    // --- tail: 26100+ layout only, occupied to reach slots 19 and 21 ---
+    virtual HRESULT STDMETHODCALLTYPE SwitchDesktopAndMoveForegroundView(
+        IVirtualDesktop*) = 0;                                        // 7
+    virtual HRESULT STDMETHODCALLTYPE CreateDesktop(IVirtualDesktop**) = 0;  // 8
+    virtual HRESULT STDMETHODCALLTYPE MoveDesktop(IVirtualDesktop*, int) = 0;  // 9
+    virtual HRESULT STDMETHODCALLTYPE RemoveDesktop(IVirtualDesktop*,
+                                                    IVirtualDesktop*) = 0;  // 10
+    virtual HRESULT STDMETHODCALLTYPE FindDesktop(GUID*,
+                                                  IVirtualDesktop**) = 0;  // 11
+    virtual HRESULT STDMETHODCALLTYPE GetDesktopSwitchIncludeExcludeViews(
+        IVirtualDesktop*, IObjectArray**, IObjectArray**) = 0;  // 12
+    virtual HRESULT STDMETHODCALLTYPE SetDesktopName(IVirtualDesktop*,
+                                                     HSTRING) = 0;  // 13
+    virtual HRESULT STDMETHODCALLTYPE SetDesktopWallpaper(IVirtualDesktop*,
+                                                          HSTRING) = 0;  // 14
+    virtual HRESULT STDMETHODCALLTYPE UpdateWallpaperPathForAllDesktops(
+        HSTRING) = 0;                                                    // 15
+    virtual HRESULT STDMETHODCALLTYPE CopyDesktopState(IUnknown*,
+                                                       IUnknown*) = 0;  // 16
+    virtual HRESULT STDMETHODCALLTYPE CreateRemoteDesktop(
+        HSTRING, IVirtualDesktop**) = 0;                                    // 17
+    virtual HRESULT STDMETHODCALLTYPE SwitchRemoteDesktop(IVirtualDesktop*,
+                                                          void*) = 0;      // 18
+    virtual HRESULT STDMETHODCALLTYPE SwitchDesktopWithAnimation(
+        IVirtualDesktop*) = 0;                                              // 19
+    virtual HRESULT STDMETHODCALLTYPE GetLastActiveDesktop(
+        IVirtualDesktop**) = 0;                                            // 20
+    virtual HRESULT STDMETHODCALLTYPE WaitForAnimationToComplete() = 0;    // 21
 };
 
 struct VersionIIDs {
@@ -280,6 +332,10 @@ struct VersionIIDs {
     PCWSTR description;
     IID managerInternal;
     IID virtualDesktop;
+    // Whether the tail of the vtable above matches this interface. Only the
+    // 26100+ layout is known, so only there may SwitchDesktopWithAnimation and
+    // WaitForAnimationToComplete be called.
+    bool animatesSwitch;
 };
 
 // Probed in order. QueryService fails cleanly with E_NOINTERFACE when the ID
@@ -296,9 +352,11 @@ static const VersionIIDs g_versionIIDs[] = {
      {0x3F07F4BE,
       0xB107,
       0x441A,
-      {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}}},
+      {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
+     /*animatesSwitch=*/true},
 
-    // Windows 11 builds 22621 / 22631 (22H2 / 23H2).
+    // Windows 11 builds 22621 / 22631 (22H2 / 23H2). The animated-switch tail
+    // is unverified for this interface, so switches here are always instant.
     {L"win11_22621",
      L"Windows 11 22621/22631 (22H2/23H2)",
      {0xA3175F2D,
@@ -308,7 +366,8 @@ static const VersionIIDs g_versionIIDs[] = {
      {0x3F07F4BE,
       0xB107,
       0x441A,
-      {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}}},
+      {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
+     /*animatesSwitch=*/false},
 };
 
 // =============================================================================
@@ -323,6 +382,7 @@ struct {
     double pillCornerRadius;
     bool labelIsName;
     int hoverDelayMs;
+    bool switchAnimation;
     bool hideWhenSingleDesktop;
     bool showOnSecondaryTaskbars;
     std::wstring windowsVersion;
@@ -380,6 +440,7 @@ static void LoadSettings() {
 
     g_settings.hoverDelayMs =
         std::clamp(Wh_GetIntSetting(L"HoverDelayMs"), 0, 5000);
+    g_settings.switchAnimation = Wh_GetIntSetting(L"SwitchAnimation") != 0;
     g_settings.hideWhenSingleDesktop =
         Wh_GetIntSetting(L"HideWhenSingleDesktop") != 0;
     g_settings.showOnSecondaryTaskbars =
@@ -570,11 +631,7 @@ class VirtualDesktopEngine {
             GUID desktopId{};
             if (SUCCEEDED(desktop->GetId(&desktopId)) &&
                 IsEqualGUID(desktopId, id)) {
-                HRESULT hr = m_manager->SwitchDesktop(desktop);
-                switched = SUCCEEDED(hr);
-                if (!switched) {
-                    VDPLOG(L"SwitchDesktop failed: 0x%08X", hr);
-                }
+                switched = ActivateDesktop(desktop);
             }
 
             desktop->Release();
@@ -585,6 +642,71 @@ class VirtualDesktopEngine {
     }
 
    private:
+    // Switches to the given desktop, sliding the way Task View does when the
+    // running build supports it and the user hasn't turned the animation off.
+    //
+    // The instant path is a bare SwitchDesktop. The animated path mirrors
+    // MScholtes/VirtualDesktop's /Switch handler exactly, because that is the
+    // command the user confirmed animates flawlessly on this machine:
+    // SwitchDesktopWithAnimation only plays its animation when the switch is
+    // initiated by the foreground thread, so the taskbar window is forced to
+    // the foreground first -- with the AttachThreadInput handshake that lets
+    // SetForegroundWindow succeed from a thread that doesn't already own the
+    // foreground -- and the switch is bracketed by WaitForAnimationToComplete
+    // so back-to-back clicks don't stack half-finished slides.
+    bool ActivateDesktop(IVirtualDesktop* desktop) {
+        const bool animate =
+            m_version && m_version->animatesSwitch && g_settings.switchAnimation;
+
+        if (!animate) {
+            HRESULT hr = m_manager->SwitchDesktop(desktop);
+            if (FAILED(hr)) {
+                VDPLOG(L"SwitchDesktop failed: 0x%08X", hr);
+            }
+            return SUCCEEDED(hr);
+        }
+
+        BringTaskbarToForeground();
+
+        m_manager->WaitForAnimationToComplete();
+        HRESULT hr = m_manager->SwitchDesktopWithAnimation(desktop);
+        if (FAILED(hr)) {
+            VDPLOG(L"SwitchDesktopWithAnimation failed: 0x%08X, "
+                   L"falling back to instant",
+                   hr);
+            hr = m_manager->SwitchDesktop(desktop);
+            return SUCCEEDED(hr);
+        }
+        m_manager->WaitForAnimationToComplete();
+        return true;
+    }
+
+    static void BringTaskbarToForeground() {
+        HWND taskbar = FindWindow(L"Shell_TrayWnd", nullptr);
+        if (!taskbar) {
+            return;
+        }
+
+        DWORD unused = 0;
+        DWORD taskbarThread = GetWindowThreadProcessId(taskbar, &unused);
+        DWORD foregroundThread =
+            GetWindowThreadProcessId(GetForegroundWindow(), &unused);
+        DWORD currentThread = GetCurrentThreadId();
+
+        // Already ours to move, or nothing to attach to -- just take it.
+        if (!taskbarThread || !foregroundThread ||
+            foregroundThread == currentThread) {
+            SetForegroundWindow(taskbar);
+            return;
+        }
+
+        AttachThreadInput(taskbarThread, currentThread, TRUE);
+        AttachThreadInput(foregroundThread, currentThread, TRUE);
+        SetForegroundWindow(taskbar);
+        AttachThreadInput(foregroundThread, currentThread, FALSE);
+        AttachThreadInput(taskbarThread, currentThread, FALSE);
+    }
+
     static std::wstring ReadDesktopName(IVirtualDesktop* desktop) {
         HSTRING name = nullptr;
         if (FAILED(desktop->GetName(&name)) || !name) {
