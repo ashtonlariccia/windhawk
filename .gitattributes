@@ -1,6 +1,5 @@
-# Keep mod sources LF in the repo so diffs against upstream stay meaningful.
+# Keep mod sources LF in the repo.
 # Windhawk itself is happy with either; ModsSource on disk is CRLF.
 *.wh.cpp text eol=lf
-*.patch  text eol=lf
 *.json   text eol=lf
 *.ps1    text eol=crlf

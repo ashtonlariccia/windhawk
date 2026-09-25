@@ -1,8 +1,8 @@
 // ==WindhawkMod==
-// @id              virtual-desktop-pager
-// @name            Virtual Desktop Pager
-// @description     A left-hand taskbar pill listing your virtual desktops, click one to switch
-// @version         1.6
+// @id              desktops
+// @name            Desktops
+// @description     Virtual desktop pager pill on the taskbar plus Linux-style Win+number, Win+N and Win+Q keybinds
+// @version         1.0
 // @author          ashtonlariccia
 // @include         explorer.exe
 // @architecture    x86-64
@@ -13,7 +13,7 @@
 //
 // The virtual desktop interface IDs and the shape of the undocumented
 // IVirtualDesktopManagerInternal vtable were taken from two GPL sources:
-//   * the "Virtual Desktop Helper" Windhawk mod by u2x1
+//   * the "Virtual Desktop Helper" Windhawk mod by u2x3
 //   * MScholtes/VirtualDesktop (VirtualDesktop11-24H2.cs)
 //
 // The taskbar visual tree helpers and the deferred-layout pattern follow the
@@ -21,97 +21,120 @@
 
 // ==WindhawkModReadme==
 /*
-# Virtual Desktop Pager
+# Desktops
 
-Adds a third pill to the taskbar, on the far left, listing the virtual desktops
-that currently exist. The active desktop's number is drawn in your Windows
-accent colour, clicking a chip switches to that desktop, and hovering shows the
-desktop's name.
+Everything virtual-desktop in one mod. Each feature has its own switch in the
+settings, so any of them can be turned off without touching the others.
+
+## Pager
+
+A pill on the far left of the taskbar listing the virtual desktops that exist.
+The active desktop's number is drawn in your accent colour, clicking a chip
+switches to that desktop, and hovering shows the desktop's name and the windows
+on it.
 
 ```
 [1][2]            [start][search][task view][apps]        [tray] [clock]
- ^^^^ this mod
+ ^^^^ the pager
 ```
 
-Desktops are still created and closed with the normal Windows shortcuts
-(`Ctrl+Win+D`, `Ctrl+Win+F4`) -- this mod only reflects and switches.
+## Keybinds
 
-On Windows 11 24H2/25H2 (build 26100+) clicking a chip slides between desktops
-with the same animation as Task View, rather than switching instantly. Turn it
-off with the **Animate desktop switches** setting. Older builds always switch
-instantly -- the animated switch method sits in a part of the shell's private
-interface whose layout is only known for 26100+.
+| Keys | Action |
+|---|---|
+| `Win+1` ... `Win+9`, `Win+0` | Switch to desktop 1 ... 9, 10. Does nothing if that desktop doesn't exist |
+| `Win+N` | Create a new desktop and switch to it |
+| `Win+Q` | Close the current desktop; its windows move to the neighbouring one |
+
+These replace the Windows shortcuts on the same keys (pinned taskbar apps, the
+notification centre, search) for as long as they are enabled.
+
+The keys are read with a low-level keyboard hook inside explorer. Windows skips
+such hooks while an **elevated** (administrator) window has focus, so the
+keybinds do nothing then -- the same limitation PowerToys has when it isn't
+itself running elevated.
+
+## Switch animation
+
+On Windows 11 24H2/25H2 (build 26100+) every switch -- a chip click or a keybind
+-- slides between desktops with the same animation as Task View. Turn it off
+with **Animate desktop switches**. Creating and closing desktops also needs
+26100+, because those methods sit in the part of the shell's private interface
+whose layout is only known there.
 
 ## Styling
 
-The pill is built from plain XAML controls with stable names, so the **Windows
-11 Taskbar Styler** can theme it like any native taskbar element:
+This mod draws only the numbers. The pill around them -- background, padding,
+corners, position -- comes from the **Shell Styler** mod's taskbar theme, which
+targets these stable element names:
 
 | Target | What it is |
 |---|---|
 | `Grid#WhVdPagerRoot` | outer container, positions the pill |
 | `Border#WhVdPagerBackground` | the pill itself: background, corner radius |
 | `StackPanel#WhVdPagerItems` | the row of chips |
-| `Button#WhVdDesktopButton` | an inactive desktop chip |
-| `Button#WhVdDesktopButtonActive` | the active desktop chip |
+| `Button#WhVdDesktopButton` | a desktop chip |
 | `TextBlock#WhVdDesktopLabel` | the number or name inside a chip |
-
-The active chip has its own name rather than a visual state, because the styler
-evaluates a target's conditions once when it first sees an element. The chip row
-is rebuilt whenever the desktop state changes, so the styler re-evaluates and
-both targets keep working.
+| `Border#WhVdHoverCard` | the hover card |
 
 ## Supported Windows versions
 
-Windows 11 22621 (22H2) and newer. Build 22000 used a different vtable layout
-(every method took an extra `HMONITOR`) and is deliberately not supported.
-
-The interface IDs Microsoft uses for the virtual desktop service change between
-Windows builds. The mod probes the IDs it knows about and keeps the one that
-answers, so no configuration is normally needed; the **Windows version** setting
-is an escape hatch for when a future build needs a new ID.
+Windows 11 22621 (22H2) and newer; create/close need 26100 (24H2) and newer.
+The interface IDs the virtual desktop service uses change between builds. The
+mod probes the ones it knows and keeps the one that answers; the **Windows
+version** setting is an escape hatch for when a future build needs a new ID.
 */
 // ==/WindhawkModReadme==
 
 // ==WindhawkModSettings==
 /*
+- PagerEnabled: true
+  $name: Pager pill
+  $description: Show the desktop pager on the taskbar.
+- KeySwitch: true
+  $name: "Keybind: Win+1 ... Win+0 switches desktop"
+- KeyNew: true
+  $name: "Keybind: Win+N creates a desktop"
+- KeyClose: true
+  $name: "Keybind: Win+Q closes the current desktop"
+- SwitchAnimation: true
+  $name: Animate desktop switches
+  $description: >-
+    Slide between desktops the way Task View does, for chip clicks and
+    keybinds alike. Windows 11 build 26100 and newer only.
+- UiAnimations: true
+  $name: Animate the pager
+  $description: >-
+    Fade the active number between colours, and fade in new chips and the
+    hover card.
 - ChipSize: 28
   $name: Chip size
   $description: Width and height of each desktop chip, in pixels.
 - ChipSpacing: 4
   $name: Chip spacing
   $description: Gap between chips, in pixels.
-- PillPadding: 4
-  $name: Pill padding
-  $description: Space between the chips and the edge of the pill, in pixels.
-- PillMargin: 8,4,0,4
-  $name: Pill margin
-  $description: >-
-    Offset of the pill from the left edge of the screen, as
-    left,top,right,bottom.
-- PillCornerRadius: 16
-  $name: Pill corner radius
 - LabelStyle: number
   $name: Chip label
   $options:
   - number: Desktop number
   - name: Desktop name
+- HoverCard: true
+  $name: Hover card
+  $description: Show the desktop's name and windows when hovering a chip.
 - HoverDelayMs: 450
   $name: Hover delay (ms)
   $description: >-
     How long to hover a chip before its card appears. Moving between chips
     while a card is already open switches instantly, as Windows tooltips do.
-    Set to 0 for no delay.
-- SwitchAnimation: true
-  $name: Animate desktop switches
-  $description: >-
-    Slide between desktops with the same animation you get from the taskbar's
-    Task View, instead of switching instantly. Only available on Windows 11
-    build 26100 and newer (24H2/25H2); older builds always switch instantly.
 - HideWhenSingleDesktop: false
-  $name: Hide when there is only one desktop
+  $name: Hide the pager when there is only one desktop
 - ShowOnSecondaryTaskbars: true
-  $name: Show on secondary taskbars
+  $name: Show the pager on secondary taskbars
+- PollIntervalMs: 400
+  $name: Refresh interval (ms)
+  $description: >-
+    How often the desktop list is re-read. Changes made by this mod's own
+    chips and keybinds show immediately regardless.
 - WindowsVersion: auto
   $name: Windows version
   $description: >-
@@ -124,15 +147,8 @@ is an escape hatch for when a future build needs a new ID.
 - DebugLogToFile: false
   $name: Write the log to a file
   $description: >-
-    Also append this mod's log to vdp-debug.log in your temp folder. Windhawk's
-    log window and any other debug-output viewer compete for the same messages,
-    so a file is the reliable way to capture a full trace when reporting a
-    problem.
-- PollIntervalMs: 400
-  $name: Refresh interval (ms)
-  $description: >-
-    How often the desktop list is re-read. Lower is more responsive, higher is
-    slightly cheaper. 400 is imperceptible after the desktop switch animation.
+    Also append this mod's log to desktops-debug.log in your temp folder, for
+    capturing a full trace when reporting a problem.
 */
 // ==/WindhawkModSettings==
 
@@ -160,6 +176,7 @@ is an escape hatch for when a future build needs a new ID.
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Xaml.Media.Animation.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 
 #include <algorithm>
@@ -167,6 +184,7 @@ is an escape hatch for when a future build needs a new ID.
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -190,7 +208,7 @@ static void DebugFileLog(PCWSTR format, ...) {
     if (!pathLength || pathLength >= ARRAYSIZE(path) - 20) {
         return;
     }
-    wcscat_s(path, L"vdp-debug.log");
+    wcscat_s(path, L"desktops-debug.log");
 
     wchar_t text[1024];
     va_list args;
@@ -271,21 +289,21 @@ struct IVirtualDesktop : public IUnknown {
 };
 
 // The prefix through SwitchDesktop (slot 6) has been stable since 22621; the
-// tail is where Microsoft keeps adding methods, so a mod that only ever calls
-// into the prefix survives Windows updates. The pager stays in the prefix for
-// everything except one thing: the animated switch. SwitchDesktopWithAnimation
-// (slot 19) and WaitForAnimationToComplete (slot 21) are what make a switch
-// slide the way Task View does, and they live deep in the tail.
+// tail is where Microsoft keeps adding methods. Reading and plain switching stay
+// in the prefix. Everything else this mod does lives in the tail:
+// CreateDesktop (8) and RemoveDesktop (10) for the Win+N / Win+Q keybinds, and
+// SwitchDesktopWithAnimation (19) with WaitForAnimationToComplete (21) for the
+// Task View slide.
 //
 // Reaching them means declaring every slot up to them, because a vtable index
-// is fixed by declaration order. The intermediate methods are declared only to
-// occupy their slots -- their parameter types are approximate and none of them
-// is ever called, so a wrong signature on, say, CopyDesktopState cannot matter.
-// The slot layout below is the 26100+ (24H2/25H2) one, taken from
-// MScholtes/VirtualDesktop (VirtualDesktop11-24H2). It is NOT the 22621 layout,
-// which is why the animated path is gated to the 26100 interface ID: on 22621
-// slot 19 is some other method entirely, and calling it blind could create or
-// destroy a desktop. See VersionIIDs::animatesSwitch.
+// is fixed by declaration order. The methods never called are declared only to
+// occupy their slots -- their parameter types are approximate, so a wrong
+// signature on, say, CopyDesktopState cannot matter. The slot layout below is
+// the 26100+ (24H2/25H2) one, taken from MScholtes/VirtualDesktop
+// (VirtualDesktop11-24H2). It is NOT the 22621 layout, which is why every tail
+// call is gated to the 26100 interface ID: on 22621 slot 19 is some other method
+// entirely, and calling it blind could create or destroy a desktop. See
+// VersionIIDs::tailKnown.
 struct IVirtualDesktopManagerInternal : public IUnknown {
     virtual HRESULT STDMETHODCALLTYPE GetCount(UINT*) = 0;
     virtual HRESULT STDMETHODCALLTYPE MoveViewToDesktop(IUnknown*,
@@ -333,9 +351,8 @@ struct VersionIIDs {
     IID managerInternal;
     IID virtualDesktop;
     // Whether the tail of the vtable above matches this interface. Only the
-    // 26100+ layout is known, so only there may SwitchDesktopWithAnimation and
-    // WaitForAnimationToComplete be called.
-    bool animatesSwitch;
+    // 26100+ layout is known, so only there may anything past slot 6 be called.
+    bool tailKnown;
 };
 
 // Probed in order. QueryService fails cleanly with E_NOINTERFACE when the ID
@@ -353,7 +370,7 @@ static const VersionIIDs g_versionIIDs[] = {
       0xB107,
       0x441A,
       {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
-     /*animatesSwitch=*/true},
+     /*tailKnown=*/true},
 
     // Windows 11 builds 22621 / 22631 (22H2 / 23H2). The animated-switch tail
     // is unverified for this interface, so switches here are always instant.
@@ -367,7 +384,7 @@ static const VersionIIDs g_versionIIDs[] = {
       0xB107,
       0x441A,
       {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
-     /*animatesSwitch=*/false},
+     /*tailKnown=*/false},
 };
 
 // =============================================================================
@@ -375,11 +392,14 @@ static const VersionIIDs g_versionIIDs[] = {
 // =============================================================================
 
 struct {
+    bool pagerEnabled;
+    bool keySwitch;
+    bool keyNew;
+    bool keyClose;
+    bool uiAnimations;
+    bool hoverCard;
     double chipSize;
     double chipSpacing;
-    double pillPadding;
-    Thickness pillMargin;
-    double pillCornerRadius;
     bool labelIsName;
     int hoverDelayMs;
     bool switchAnimation;
@@ -389,51 +409,21 @@ struct {
     int pollIntervalMs;
 } g_settings;
 
-static Thickness ParseThickness(PCWSTR str, Thickness fallback) {
-    double values[4]{};
-    int count = 0;
-
-    PCWSTR p = str;
-    while (p && *p && count < 4) {
-        PWSTR end = nullptr;
-        double value = wcstod(p, &end);
-        if (end == p) {
-            break;
-        }
-        values[count++] = value;
-        p = end;
-        while (*p == L',' || *p == L' ') {
-            p++;
-        }
-    }
-
-    switch (count) {
-        case 1:
-            return Thickness{values[0], values[0], values[0], values[0]};
-        case 4:
-            return Thickness{values[0], values[1], values[2], values[3]};
-        default:
-            return fallback;
-    }
-}
-
 static double ClampDouble(int value, int minValue, int maxValue) {
     return static_cast<double>(std::clamp(value, minValue, maxValue));
 }
 
 static void LoadSettings() {
+    g_settings.pagerEnabled = Wh_GetIntSetting(L"PagerEnabled") != 0;
+    g_settings.keySwitch = Wh_GetIntSetting(L"KeySwitch") != 0;
+    g_settings.keyNew = Wh_GetIntSetting(L"KeyNew") != 0;
+    g_settings.keyClose = Wh_GetIntSetting(L"KeyClose") != 0;
+    g_settings.uiAnimations = Wh_GetIntSetting(L"UiAnimations") != 0;
+    g_settings.hoverCard = Wh_GetIntSetting(L"HoverCard") != 0;
+
     g_settings.chipSize = ClampDouble(Wh_GetIntSetting(L"ChipSize"), 8, 200);
     g_settings.chipSpacing =
         ClampDouble(Wh_GetIntSetting(L"ChipSpacing"), 0, 100);
-    g_settings.pillPadding =
-        ClampDouble(Wh_GetIntSetting(L"PillPadding"), 0, 100);
-    g_settings.pillCornerRadius =
-        ClampDouble(Wh_GetIntSetting(L"PillCornerRadius"), 0, 100);
-
-    PCWSTR margin = Wh_GetStringSetting(L"PillMargin");
-    g_settings.pillMargin = ParseThickness(margin, Thickness{8, 4, 0, 4});
-    Wh_FreeStringSetting(margin);
-
     PCWSTR labelStyle = Wh_GetStringSetting(L"LabelStyle");
     g_settings.labelIsName = labelStyle && wcscmp(labelStyle, L"name") == 0;
     Wh_FreeStringSetting(labelStyle);
@@ -606,42 +596,118 @@ class VirtualDesktopEngine {
         return !snapshot->desktops.empty();
     }
 
-    bool SwitchTo(const GUID& id) {
-        if (!m_manager) {
+    // Zero-based. An index past the last desktop is a no-op, not an error --
+    // Win+5 with three desktops does nothing, by design.
+    bool SwitchToIndex(int index) {
+        IVirtualDesktop* desktop = GetAt(index);
+        if (!desktop) {
             return false;
+        }
+
+        bool switched = ActivateDesktop(desktop);
+        desktop->Release();
+        return switched;
+    }
+
+    // Windows appends the new desktop after the last one.
+    bool CreateAndSwitch() {
+        if (!CanUseTail()) {
+            VDPLOG(L"Create: needs the 26100+ interface");
+            return false;
+        }
+
+        IVirtualDesktop* desktop = nullptr;
+        HRESULT hr = m_manager->CreateDesktop(&desktop);
+        if (FAILED(hr) || !desktop) {
+            VDPLOG(L"CreateDesktop failed: 0x%08X", hr);
+            return false;
+        }
+
+        bool switched = ActivateDesktop(desktop);
+        desktop->Release();
+        return switched;
+    }
+
+    // Closes the current desktop. Its windows move to the fallback, which is
+    // the neighbour on the left, or on the right when closing the first one --
+    // the same choice Task View makes. With animation on, the slide to the
+    // fallback plays first and the now-background desktop is removed after, so
+    // closing looks like a switch rather than a jump cut.
+    bool RemoveCurrent() {
+        if (!CanUseTail()) {
+            VDPLOG(L"Remove: needs the 26100+ interface");
+            return false;
+        }
+
+        IVirtualDesktop* current = nullptr;
+        if (FAILED(m_manager->GetCurrentDesktop(&current)) || !current) {
+            return false;
+        }
+
+        IVirtualDesktop* fallback = nullptr;
+        if (FAILED(m_manager->GetAdjacentDesktop(current, kAdjacentLeft,
+                                                 &fallback)) ||
+            !fallback) {
+            fallback = nullptr;
+            if (FAILED(m_manager->GetAdjacentDesktop(current, kAdjacentRight,
+                                                     &fallback)) ||
+                !fallback) {
+                // The only desktop -- there is nowhere for its windows to go.
+                current->Release();
+                return false;
+            }
+        }
+
+        if (AnimationEnabled()) {
+            ActivateDesktop(fallback);
+        }
+
+        HRESULT hr = m_manager->RemoveDesktop(current, fallback);
+        if (FAILED(hr)) {
+            VDPLOG(L"RemoveDesktop failed: 0x%08X", hr);
+        }
+
+        fallback->Release();
+        current->Release();
+        return SUCCEEDED(hr);
+    }
+
+   private:
+    static constexpr int kAdjacentLeft = 3;
+    static constexpr int kAdjacentRight = 4;
+
+    bool CanUseTail() const {
+        return m_manager && m_version && m_version->tailKnown;
+    }
+
+    bool AnimationEnabled() const {
+        return CanUseTail() && g_settings.switchAnimation;
+    }
+
+    // Returns an owned reference, or null.
+    IVirtualDesktop* GetAt(int index) {
+        if (!m_manager || index < 0) {
+            return nullptr;
         }
 
         IObjectArray* desktops = nullptr;
         if (FAILED(m_manager->GetDesktops(&desktops)) || !desktops) {
-            return false;
+            return nullptr;
         }
 
-        bool switched = false;
+        IVirtualDesktop* desktop = nullptr;
         UINT count = 0;
         desktops->GetCount(&count);
-
-        for (UINT i = 0; i < count && !switched; i++) {
-            IVirtualDesktop* desktop = nullptr;
-            if (FAILED(desktops->GetAt(i, m_version->virtualDesktop,
-                                       reinterpret_cast<void**>(&desktop))) ||
-                !desktop) {
-                continue;
-            }
-
-            GUID desktopId{};
-            if (SUCCEEDED(desktop->GetId(&desktopId)) &&
-                IsEqualGUID(desktopId, id)) {
-                switched = ActivateDesktop(desktop);
-            }
-
-            desktop->Release();
+        if (static_cast<UINT>(index) < count &&
+            FAILED(desktops->GetAt(index, m_version->virtualDesktop,
+                                   reinterpret_cast<void**>(&desktop)))) {
+            desktop = nullptr;
         }
 
         desktops->Release();
-        return switched;
+        return desktop;
     }
 
-   private:
     // Switches to the given desktop, sliding the way Task View does when the
     // running build supports it and the user hasn't turned the animation off.
     //
@@ -655,10 +721,13 @@ class VirtualDesktopEngine {
     // foreground -- and the switch is bracketed by WaitForAnimationToComplete
     // so back-to-back clicks don't stack half-finished slides.
     bool ActivateDesktop(IVirtualDesktop* desktop) {
-        const bool animate =
-            m_version && m_version->animatesSwitch && g_settings.switchAnimation;
+        // Pressing the key for the desktop you're already on would otherwise
+        // play a pointless bounce, or steal focus for nothing.
+        if (IsCurrent(desktop)) {
+            return true;
+        }
 
-        if (!animate) {
+        if (!AnimationEnabled()) {
             HRESULT hr = m_manager->SwitchDesktop(desktop);
             if (FAILED(hr)) {
                 VDPLOG(L"SwitchDesktop failed: 0x%08X", hr);
@@ -679,6 +748,19 @@ class VirtualDesktopEngine {
         }
         m_manager->WaitForAnimationToComplete();
         return true;
+    }
+
+    bool IsCurrent(IVirtualDesktop* desktop) {
+        IVirtualDesktop* current = nullptr;
+        if (FAILED(m_manager->GetCurrentDesktop(&current)) || !current) {
+            return false;
+        }
+
+        GUID a{}, b{};
+        bool same = SUCCEEDED(current->GetId(&a)) &&
+                    SUCCEEDED(desktop->GetId(&b)) && IsEqualGUID(a, b);
+        current->Release();
+        return same;
     }
 
     static void BringTaskbarToForeground() {
@@ -736,9 +818,19 @@ static HANDLE g_workerWakeEvent;
 static std::atomic<bool> g_workerStop;
 static std::atomic<bool> g_reconnectRequested;
 
+// Everything that changes desktops goes through one queue, drained by the
+// worker thread that owns the COM pointers -- chip clicks from the UI thread
+// and keybinds from the hook thread alike.
+enum class DesktopActionType { SwitchToIndex, Create, RemoveCurrent };
+
+struct DesktopAction {
+    DesktopActionType type;
+    int index;  // SwitchToIndex, zero-based
+};
+
 static std::mutex g_stateMutex;
-static DesktopSnapshot g_snapshot;       // guarded by g_stateMutex
-static std::vector<GUID> g_switchQueue;  // guarded by g_stateMutex
+static DesktopSnapshot g_snapshot;               // guarded by g_stateMutex
+static std::vector<DesktopAction> g_actionQueue;  // guarded by g_stateMutex
 
 static void OnSnapshotChanged(const DesktopSnapshot& snapshot);
 static bool TryHookTaskbarViewDll(PCWSTR reason);
@@ -754,11 +846,10 @@ static std::atomic<bool> g_taskbarViewDllHooked;
 // a module load.
 static std::atomic<bool> g_loaderNotified;
 
-// Queues a switch for the worker thread.
-static void RequestSwitchToDesktop(const GUID& id) {
+static void QueueDesktopAction(const DesktopAction& action) {
     {
         std::lock_guard<std::mutex> guard(g_stateMutex);
-        g_switchQueue.push_back(id);
+        g_actionQueue.push_back(action);
     }
     SetEvent(g_workerWakeEvent);
 }
@@ -833,7 +924,6 @@ static PCWSTR kPagerRootName = L"WhVdPagerRoot";
 static PCWSTR kPagerBackgroundName = L"WhVdPagerBackground";
 static PCWSTR kPagerItemsName = L"WhVdPagerItems";
 static PCWSTR kChipName = L"WhVdDesktopButton";
-static PCWSTR kChipActiveName = L"WhVdDesktopButtonActive";
 static PCWSTR kChipLabelName = L"WhVdDesktopLabel";
 static PCWSTR kHoverPopupName = L"WhVdHoverPopup";
 static PCWSTR kHoverCardName = L"WhVdHoverCard";
@@ -935,6 +1025,25 @@ static std::wstring DesktopDisplayName(const DesktopSnapshot& snapshot,
     return L"Desktop " + std::to_wstring(index + 1);
 }
 
+static const auto kFadeInDuration = std::chrono::milliseconds(90);
+
+// A plain opacity ramp. The built-in theme transitions carry a slide and run
+// for ~300ms, which reads as sluggish on something as small as a chip.
+static void FadeIn(UIElement element) {
+    element.Opacity(0);
+
+    Media::Animation::DoubleAnimation fade;
+    fade.From(0.0);
+    fade.To(1.0);
+    fade.Duration(DurationHelper::FromTimeSpan(kFadeInDuration));
+    Media::Animation::Storyboard::SetTarget(fade, element);
+    Media::Animation::Storyboard::SetTargetProperty(fade, L"Opacity");
+
+    Media::Animation::Storyboard storyboard;
+    storyboard.Children().Append(fade);
+    storyboard.Begin();
+}
+
 // The card's parts are reached through the tree rather than cached, so there is
 // no second lifetime to reason about: if the pager root is alive, so is its card.
 struct HoverCardParts {
@@ -1011,6 +1120,9 @@ static void ShowHoverCard(const PagerInstance& pager,
     popup.HorizontalOffset(offset.X);
     if (card.ActualHeight() > 0) {
         popup.VerticalOffset(offset.Y - card.ActualHeight() - kHoverCardGap);
+    }
+    if (!popup.IsOpen() && g_settings.uiAnimations) {
+        FadeIn(card);
     }
     popup.IsOpen(true);
 
@@ -1126,99 +1238,181 @@ static void HideHoverCard(const PagerInstance& pager) {
     }
 }
 
-static void RebuildChips(const PagerInstance& pager,
-                         const DesktopSnapshot& snapshot,
-                         int activeIndex) {
+static void UpdateChips(const PagerInstance& pager,
+                        const DesktopSnapshot& snapshot);
+
+static const winrt::Windows::UI::Color kInactiveLabelColor{0xB3, 0xFF, 0xFF,
+                                                          0xFF};
+static const auto kLabelFadeDuration = std::chrono::milliseconds(100);
+
+static winrt::Windows::UI::Color AccentTextColor() {
+    if (auto brush = AccentTextBrush().try_as<Media::SolidColorBrush>()) {
+        return brush.Color();
+    }
+    return winrt::Windows::UI::Color{0xFF, 0xFF, 0xFF, 0xFF};
+}
+
+// Each label owns its brush, so its colour can be animated without touching
+// the shared theme resource the accent was read from.
+static void SetLabelColor(Controls::TextBlock label,
+                          winrt::Windows::UI::Color color,
+                          bool animate) {
+    auto brush = label.Foreground().try_as<Media::SolidColorBrush>();
+    if (!brush) {
+        label.Foreground(Media::SolidColorBrush(color));
+        return;
+    }
+
+    if (!animate) {
+        brush.Color(color);
+        return;
+    }
+
+    Media::Animation::ColorAnimation fade;
+    fade.To(color);
+    fade.Duration(DurationHelper::FromTimeSpan(kLabelFadeDuration));
+    fade.EnableDependentAnimation(true);
+    Media::Animation::Storyboard::SetTarget(fade, brush);
+    Media::Animation::Storyboard::SetTargetProperty(fade, L"Color");
+
+    Media::Animation::Storyboard storyboard;
+    storyboard.Children().Append(fade);
+    storyboard.Begin();
+}
+
+static Controls::Button CreateChip(const PagerInstance& pager, int index) {
+    Controls::TextBlock label;
+    label.Name(kChipLabelName);
+    label.FontSize(12);
+    label.Foreground(Media::SolidColorBrush(kInactiveLabelColor));
+    label.HorizontalAlignment(HorizontalAlignment::Center);
+    label.VerticalAlignment(VerticalAlignment::Center);
+
+    Controls::Button chip;
+    chip.Name(kChipName);
+    chip.Content(label);
+    chip.Height(g_settings.chipSize);
+    chip.MinWidth(g_settings.chipSize);
+    chip.MinHeight(0);
+    chip.Padding(Thickness{6, 0, 6, 0});
+    chip.BorderThickness(Thickness{});
+    chip.CornerRadius(CornerRadius{
+        g_settings.chipSize / 2, g_settings.chipSize / 2,
+        g_settings.chipSize / 2, g_settings.chipSize / 2});
+    // No fill: the active desktop reads as an accent coloured number.
+    // Transparent rather than null so the whole chip still hit-tests for
+    // clicks and hover.
+    chip.Background(MakeBrush(0x00, 0x00, 0x00, 0x00));
+    chip.HorizontalContentAlignment(HorizontalAlignment::Center);
+    chip.VerticalContentAlignment(VerticalAlignment::Center);
+    chip.Margin(index == 0 ? Thickness{}
+                           : Thickness{g_settings.chipSpacing, 0, 0, 0});
+
+    // Chips are reused by position as desktops come and go, so they act on
+    // their index, not on the GUID of whichever desktop was there when the
+    // chip was made.
+    chip.Click([index, pager](winrt::Windows::Foundation::IInspectable const&,
+                              RoutedEventArgs const&) {
+        if (g_unloading) {
+            return;
+        }
+
+        // Acknowledge the click right away rather than when the slide ends.
+        auto snapshot = GetDesktopSnapshot();
+        if (index < static_cast<int>(snapshot.desktops.size())) {
+            snapshot.currentIndex = index;
+            UpdateChips(pager, snapshot);
+        }
+
+        QueueDesktopAction({DesktopActionType::SwitchToIndex, index});
+    });
+
+    chip.PointerEntered(
+        [index, pager](winrt::Windows::Foundation::IInspectable const& sender,
+                       Input::PointerRoutedEventArgs const&) {
+            if (g_unloading || !g_settings.hoverCard) {
+                return;
+            }
+
+            if (auto chipElement = sender.try_as<Controls::Button>()) {
+                ScheduleHoverCard(pager, chipElement, index);
+            }
+        });
+
+    chip.PointerExited([pager](winrt::Windows::Foundation::IInspectable const&,
+                               Input::PointerRoutedEventArgs const&) {
+        HideHoverCard(pager);
+    });
+
+    return chip;
+}
+
+// Brings the chip row in line with the snapshot by editing it, not replacing
+// it: chips are appended or removed only at the end, and the rest just have
+// their label and colour updated. That keeps a switch to a pure colour fade,
+// and lets the row's transitions animate only the chips that actually came or
+// went.
+static void UpdateChips(const PagerInstance& pager,
+                        const DesktopSnapshot& snapshot) {
     auto items = pager.items.get();
     if (!items) {
         return;
     }
 
-    items.Children().Clear();
+    auto children = items.Children();
+    size_t count = snapshot.desktops.size();
 
-    for (size_t i = 0; i < snapshot.desktops.size(); i++) {
-        bool isActive = static_cast<int>(i) == activeIndex;
+    while (children.Size() > count) {
+        children.RemoveAtEnd();
+    }
+    // Only chips for desktops created after the row first appeared fade in;
+    // the initial build just shows up.
+    const bool fadeNewChips = g_settings.uiAnimations && children.Size() > 0;
+    while (children.Size() < count) {
+        auto chip = CreateChip(pager, static_cast<int>(children.Size()));
+        children.Append(chip);
+        if (fadeNewChips) {
+            FadeIn(chip);
+        }
+    }
+
+    const auto accent = AccentTextColor();
+
+    for (size_t i = 0; i < count; i++) {
+        auto chip = children.GetAt(static_cast<uint32_t>(i))
+                        .try_as<Controls::Button>();
+        auto label = chip ? chip.Content().try_as<Controls::TextBlock>()
+                          : nullptr;
+        if (!label) {
+            continue;
+        }
+
         std::wstring displayName = DesktopDisplayName(snapshot, i);
-
-        Controls::TextBlock label;
-        label.Name(kChipLabelName);
-        label.Text(g_settings.labelIsName ? displayName
-                                          : std::to_wstring(i + 1));
-        label.FontSize(12);
-        label.FontWeight(isActive
-                             ? winrt::Windows::UI::Text::FontWeights::SemiBold()
-                             : winrt::Windows::UI::Text::FontWeights::Normal());
-        label.Foreground(isActive ? AccentTextBrush()
-                                  : MakeBrush(0xB3, 0xFF, 0xFF, 0xFF));
-        label.HorizontalAlignment(HorizontalAlignment::Center);
-        label.VerticalAlignment(VerticalAlignment::Center);
-
-        Controls::Button chip;
-        chip.Name(isActive ? kChipActiveName : kChipName);
-        chip.Content(label);
-        chip.Height(g_settings.chipSize);
-        chip.MinWidth(g_settings.chipSize);
-        chip.MinHeight(0);
-        chip.Padding(Thickness{6, 0, 6, 0});
-        chip.BorderThickness(Thickness{});
-        chip.CornerRadius(CornerRadius{
-            g_settings.chipSize / 2, g_settings.chipSize / 2,
-            g_settings.chipSize / 2, g_settings.chipSize / 2});
-        // No fill on either state: the active desktop reads as an accent
-        // coloured number, and leaving the faint fill on the inactive chips
-        // would make the active one look like a hole punched in the row.
-        // Transparent rather than null so the whole chip still hit-tests for
-        // clicks and hover.
-        chip.Background(MakeBrush(0x00, 0x00, 0x00, 0x00));
-        chip.HorizontalContentAlignment(HorizontalAlignment::Center);
-        chip.VerticalContentAlignment(VerticalAlignment::Center);
-        chip.Margin(i == 0 ? Thickness{}
-                           : Thickness{g_settings.chipSpacing, 0, 0, 0});
-
+        std::wstring text =
+            g_settings.labelIsName ? displayName : std::to_wstring(i + 1);
+        if (label.Text() != text) {
+            label.Text(text);
+        }
         chip.SetValue(Automation::AutomationProperties::NameProperty(),
                       winrt::box_value(winrt::hstring(displayName)));
 
-        GUID id = snapshot.desktops[i].id;
-        int index = static_cast<int>(i);
+        bool isActive = static_cast<int>(i) == snapshot.currentIndex;
+        std::optional<bool> wasActive;
+        if (auto tag = label.Tag()) {
+            wasActive = tag.try_as<bool>();
+        }
+        if (wasActive && *wasActive == isActive) {
+            continue;
+        }
 
-        chip.Click([id, index, pager](
-                       winrt::Windows::Foundation::IInspectable const&,
-                       RoutedEventArgs const&) {
-            if (g_unloading) {
-                return;
-            }
-
-            // Repaint immediately rather than waiting for the next poll, so
-            // the chip acknowledges the click before the switch animation
-            // finishes.
-            auto snapshot = GetDesktopSnapshot();
-            if (index < static_cast<int>(snapshot.desktops.size())) {
-                RebuildChips(pager, snapshot, index);
-            }
-
-            RequestSwitchToDesktop(id);
-        });
-
-        chip.PointerEntered(
-            [index, pager](winrt::Windows::Foundation::IInspectable const& sender,
-                           Input::PointerRoutedEventArgs const&) {
-                if (g_unloading) {
-                    return;
-                }
-
-                auto chipElement = sender.try_as<Controls::Button>();
-                if (chipElement) {
-                    ScheduleHoverCard(pager, chipElement, index);
-                }
-            });
-
-        chip.PointerExited(
-            [pager](winrt::Windows::Foundation::IInspectable const&,
-                    Input::PointerRoutedEventArgs const&) {
-                HideHoverCard(pager);
-            });
-
-        items.Children().Append(chip);
+        label.Tag(winrt::box_value(isActive));
+        label.FontWeight(isActive
+                             ? winrt::Windows::UI::Text::FontWeights::SemiBold()
+                             : winrt::Windows::UI::Text::FontWeights::Normal());
+        // A chip seen for the first time snaps to its colour; only a change of
+        // state fades.
+        SetLabelColor(label, isActive ? accent : kInactiveLabelColor,
+                      g_settings.uiAnimations && wasActive.has_value());
     }
 }
 
@@ -1230,7 +1424,11 @@ static void UpdatePagerUI(const PagerInstance& pager,
         return;
     }
 
-    bool hide = g_unloading || snapshot.desktops.empty() ||
+    // A disabled pager is still built, just collapsed: the taskbar measures
+    // only while it is being assembled, so a pager that didn't exist then
+    // would have no way to appear when the setting is switched back on.
+    bool hide = g_unloading || !g_settings.pagerEnabled ||
+                snapshot.desktops.empty() ||
                 (g_settings.hideWhenSingleDesktop &&
                  snapshot.desktops.size() == 1);
     root.Visibility(hide ? Visibility::Collapsed : Visibility::Visible);
@@ -1238,7 +1436,7 @@ static void UpdatePagerUI(const PagerInstance& pager,
         return;
     }
 
-    RebuildChips(pager, snapshot, snapshot.currentIndex);
+    UpdateChips(pager, snapshot);
 }
 
 // Dumps the direct children of an element once per element, so a failure to
@@ -1284,7 +1482,7 @@ static void LogChildren(PCWSTR what, FrameworkElement element) {
 // owned by a window that lives as long as explorer does -- so there is nothing
 // to protect against, and a strong pointer spares the next load a resolution
 // step that could quietly come back empty.
-static const wchar_t kHandoffPropName[] = L"WhVdPagerHandoff";
+static const wchar_t kHandoffPropName[] = L"WhDesktopsHandoff";
 
 static const UINT kMaxHandoffRoots = 8;
 
@@ -1503,13 +1701,9 @@ static void EnsurePagerForXamlRoot(XamlRoot xamlRoot) {
     Controls::Border background;
     background.Name(kPagerBackgroundName);
     background.Child(items);
-    background.Padding(Thickness{g_settings.pillPadding, g_settings.pillPadding,
-                                 g_settings.pillPadding,
-                                 g_settings.pillPadding});
-    background.CornerRadius(CornerRadius{
-        g_settings.pillCornerRadius, g_settings.pillCornerRadius,
-        g_settings.pillCornerRadius, g_settings.pillCornerRadius});
-    background.Background(MakeBrush(0x4D, 0x00, 0x00, 0x00));
+    // Deliberately unstyled: the pill's look -- background, padding, corners,
+    // margin -- belongs to the Shell Styler theme, which targets this element
+    // by name. This mod only draws the numbers.
     background.VerticalAlignment(VerticalAlignment::Center);
 
     Controls::Grid root;
@@ -1519,7 +1713,7 @@ static void EnsurePagerForXamlRoot(XamlRoot xamlRoot) {
     root.Tag(hoverPopup);
     root.HorizontalAlignment(HorizontalAlignment::Left);
     root.VerticalAlignment(VerticalAlignment::Stretch);
-    root.Margin(g_settings.pillMargin);
+    root.Margin(Thickness{8, 0, 0, 0});
 
     content.Children().Append(root);
 
@@ -1867,6 +2061,50 @@ static std::wstring DescribeWindowsOnDesktop(
 // Worker thread
 // =============================================================================
 
+static bool IsSwitchAction(const DesktopAction& action) {
+    return action.type == DesktopActionType::SwitchToIndex;
+}
+
+// An animated switch blocks the worker for its whole slide, so tapping Win+2
+// Win+3 Win+4 quickly would otherwise queue three slides back to back. Only
+// where you ended up matters: a run of consecutive switches collapses to its
+// last one. Creates and removes are never dropped.
+static void CoalesceSwitches(std::vector<DesktopAction>* actions) {
+    std::vector<DesktopAction> result;
+    for (const auto& action : *actions) {
+        if (IsSwitchAction(action) && !result.empty() &&
+            IsSwitchAction(result.back())) {
+            result.back() = action;
+        } else {
+            result.push_back(action);
+        }
+    }
+    actions->swap(result);
+}
+
+// Moves the pager's highlight to the target the moment a switch is requested,
+// instead of after the slide finishes and the next poll notices. lastSnapshot
+// is updated too, so the real read that follows the switch finds nothing new
+// and doesn't rebuild the row a second time.
+static void PublishOptimisticSwitch(const DesktopAction& action,
+                                    DesktopSnapshot* lastSnapshot) {
+    int target =
+        action.type == DesktopActionType::SwitchToIndex ? action.index : -1;
+
+    if (target < 0 ||
+        target >= static_cast<int>(lastSnapshot->desktops.size()) ||
+        target == lastSnapshot->currentIndex) {
+        return;
+    }
+
+    lastSnapshot->currentIndex = target;
+    {
+        std::lock_guard<std::mutex> guard(g_stateMutex);
+        g_snapshot = *lastSnapshot;
+    }
+    OnSnapshotChanged(*lastSnapshot);
+}
+
 static void WorkerThreadProc() {
     HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hrInit)) {
@@ -1936,13 +2174,27 @@ static void WorkerThreadProc() {
             lastSnapshot = DesktopSnapshot();
         }
 
-        std::vector<GUID> switchRequests;
+        std::vector<DesktopAction> actions;
         {
             std::lock_guard<std::mutex> guard(g_stateMutex);
-            switchRequests.swap(g_switchQueue);
+            actions.swap(g_actionQueue);
         }
-        for (const auto& id : switchRequests) {
-            engine.SwitchTo(id);
+        CoalesceSwitches(&actions);
+
+        for (const auto& action : actions) {
+            PublishOptimisticSwitch(action, &lastSnapshot);
+
+            switch (action.type) {
+                case DesktopActionType::SwitchToIndex:
+                    engine.SwitchToIndex(action.index);
+                    break;
+                case DesktopActionType::Create:
+                    engine.CreateAndSwitch();
+                    break;
+                case DesktopActionType::RemoveCurrent:
+                    engine.RemoveCurrent();
+                    break;
+            }
         }
 
         HoverRequest hoverRequest;
@@ -2234,6 +2486,174 @@ LONG NTAPI LdrLoadDll_Hook(PWSTR searchPath,
 }
 
 // =============================================================================
+// Keybinds
+// =============================================================================
+
+// A low-level keyboard hook sees keys before explorer's own hotkey handling,
+// so returning nonzero takes Win+1, Win+N and Win+Q away from the shell -- the
+// same mechanism PowerToys Keyboard Manager uses. The hook only decides and
+// queues; every desktop operation happens on the worker, well inside the
+// LowLevelHooksTimeout budget.
+//
+// The hook needs a thread that pumps messages, which the worker (blocked in
+// WaitForSingleObject, and for whole slides in WaitForAnimationToComplete)
+// is not. So it gets its own.
+
+static std::thread g_keyThread;
+static std::atomic<DWORD> g_keyThreadId;
+
+// Keys whose keydown was swallowed, so their auto-repeats and keyup are
+// swallowed too instead of leaking a stray '1' or 'q' to the focused app.
+// Touched only on the key thread.
+static bool g_swallowed[256];
+
+// Any unassigned virtual key works; this is the one PowerToys uses.
+static const WORD kDummyKey = 0xFF;
+
+static bool IsKeyDown(int vk) {
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+
+// Returns true and fills *action when this keydown is one of ours.
+static bool MatchKeybind(DWORD vk, DesktopAction* action) {
+    if (!IsKeyDown(VK_LWIN) && !IsKeyDown(VK_RWIN)) {
+        return false;
+    }
+    // Exactly Win: Win+Shift+1, Ctrl+Win+... and friends stay Windows'.
+    if (IsKeyDown(VK_SHIFT) || IsKeyDown(VK_CONTROL) || IsKeyDown(VK_MENU)) {
+        return false;
+    }
+
+    if (g_settings.keySwitch && vk >= '0' && vk <= '9') {
+        // The number row reads 1..9 then 0, so 0 is the tenth desktop.
+        int index = vk == '0' ? 9 : static_cast<int>(vk - '1');
+        *action = {DesktopActionType::SwitchToIndex, index};
+        return true;
+    }
+    if (g_settings.keyNew && vk == 'N') {
+        *action = {DesktopActionType::Create, -1};
+        return true;
+    }
+    if (g_settings.keyClose && vk == 'Q') {
+        *action = {DesktopActionType::RemoveCurrent, -1};
+        return true;
+    }
+    return false;
+}
+
+// Explorer opens Start when it sees Win go down and up with nothing in
+// between. Swallowing the '1' leaves exactly that, so a harmless key is
+// injected while Win is still held to make it a chord again.
+static void SendDummyKey() {
+    INPUT inputs[2]{};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = kDummyKey;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = kDummyKey;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
+}
+
+static LRESULT CALLBACK LowLevelKeyboardProc(int code,
+                                             WPARAM wParam,
+                                             LPARAM lParam) {
+    if (code != HC_ACTION || g_unloading) {
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    const auto* info = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
+    // Injected input -- including our own dummy key -- is never ours to eat.
+    if (!info || (info->flags & LLKHF_INJECTED) || info->vkCode > 0xFF) {
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    DWORD vk = info->vkCode;
+    bool isDown = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
+
+    if (!isDown) {
+        if (g_swallowed[vk]) {
+            g_swallowed[vk] = false;
+            return 1;
+        }
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    if (g_swallowed[vk]) {
+        return 1;  // auto-repeat of a key we already acted on
+    }
+
+    DesktopAction action;
+    if (!MatchKeybind(vk, &action)) {
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    g_swallowed[vk] = true;
+    SendDummyKey();
+    QueueDesktopAction(action);
+    return 1;
+}
+
+static void KeyThreadProc(HANDLE readyEvent) {
+    // Make sure the thread has a message queue before anyone can post WM_QUIT
+    // to it; a quit posted to a queue-less thread is silently lost.
+    MSG msg;
+    PeekMessage(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    g_keyThreadId = GetCurrentThreadId();
+    SetEvent(readyEvent);
+
+    // Our own module, not explorer.exe: the hook procedure lives in this DLL.
+    HMODULE self = nullptr;
+    GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                      reinterpret_cast<LPCWSTR>(&LowLevelKeyboardProc), &self);
+
+    HHOOK hook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, self, 0);
+    if (!hook) {
+        VDPLOG(L"SetWindowsHookEx failed: %u", GetLastError());
+    } else {
+        VDPLOG(L"Keybind hook installed");
+    }
+
+    while (GetMessage(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    if (hook) {
+        UnhookWindowsHookEx(hook);
+    }
+    g_keyThreadId = 0;
+}
+
+static void StopKeybinds() {
+    if (!g_keyThread.joinable()) {
+        return;
+    }
+
+    if (DWORD id = g_keyThreadId) {
+        PostThreadMessage(id, WM_QUIT, 0, 0);
+    }
+    g_keyThread.join();
+    memset(g_swallowed, 0, sizeof(g_swallowed));
+}
+
+static void StartKeybinds() {
+    if (g_keyThread.joinable() ||
+        !(g_settings.keySwitch || g_settings.keyNew || g_settings.keyClose)) {
+        return;
+    }
+
+    HANDLE readyEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!readyEvent) {
+        return;
+    }
+
+    g_keyThread = std::thread(KeyThreadProc, readyEvent);
+    WaitForSingleObject(readyEvent, INFINITE);
+    CloseHandle(readyEvent);
+}
+
+// =============================================================================
 // Mod entry points
 // =============================================================================
 
@@ -2273,6 +2693,8 @@ BOOL Wh_ModInit() {
 
     g_workerStop = false;
     g_workerThread = std::thread(WorkerThreadProc);
+
+    StartKeybinds();
 
     return TRUE;
 }
@@ -2336,6 +2758,9 @@ void Wh_ModSettingsChanged() {
         }
     }
 
+    StopKeybinds();
+    StartKeybinds();
+
     g_reconnectRequested = true;
     SetEvent(g_workerWakeEvent);
 }
@@ -2344,6 +2769,8 @@ void Wh_ModBeforeUninit() {
     VDPLOG(L"Before uninit");
 
     g_unloading = true;
+
+    StopKeybinds();
 
     g_workerStop = true;
     if (g_workerWakeEvent) {

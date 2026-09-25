@@ -4,9 +4,7 @@
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot     = Split-Path -Parent $PSScriptRoot
-$UpstreamDir  = Join-Path $RepoRoot 'upstream'
 $ModsDir      = Join-Path $RepoRoot 'mods'
-$PatchesDir   = Join-Path $RepoRoot 'patches'
 $BuildDir     = Join-Path $RepoRoot 'build'
 
 $WhInstall    = 'C:\Program Files\Windhawk'
@@ -18,7 +16,6 @@ $WhModsSource = Join-Path $WhData 'ModsSource'
 $WhWorkspace  = Join-Path $WhData 'EditorWorkspace'
 $WhExe        = Join-Path $WhInstall 'windhawk.exe'
 
-$UpstreamRawBase = 'https://raw.githubusercontent.com/ramensoftware/windhawk-mods/main/mods'
 
 function Get-WhEngineVersion {
     $engineRoot = Join-Path $WhInstall 'Engine'
