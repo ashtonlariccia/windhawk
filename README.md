@@ -1,13 +1,14 @@
 # Windhawk config
 
 The whole Windhawk setup: the shell's look, its virtual desktops and a handful
-of behaviour tweaks. Three mods, each feature inside them on its own switch.
+of behaviour tweaks. Four mods, each feature inside them on its own switch.
 
 | Mod | Runs in | Features |
 |---|---|---|
 | [`desktops`](mods/desktops.wh.cpp) | explorer | Desktop pager on the taskbar · Win+1…0 / Win+N / Win+Q keybinds · Task View slide on switch |
 | [`shell-styler`](mods/shell-styler.wh.cpp) | explorer, Start menu, notification center | Taskbar, Start menu and notification center themes · Start menu system info panel · taskbar dock animation |
 | [`tweaks`](mods/tweaks.wh.cpp) | every app | Genie minimize · auto-hide taskbar when maximized · Alt+Tab delay · desktop drag-select · MB/GB file sizes |
+| [`widgets`](mods/widgets.wh.cpp) | explorer | Desktop calendar · now-playing card |
 
 This replaced, on 2026-09-25, ten separately installed mods plus PowerToys
 Keyboard Manager driving `VirtualDesktop11-24H2.exe` for the desktop keybinds.
@@ -72,6 +73,24 @@ calculation (which also made its "mix folders when sorting" option a no-op),
 auto-hide's ExplorerPatcher / Windows 10 / old-taskbar support and its
 per-event window logging (which opened a process handle for every window event
 explorer saw, logging on or not).
+
+### Widgets
+
+Cards on the desktop, drawn with Direct2D into layered windows that the
+desktop window (Progman) owns. Being owned by it is what keeps them above the
+wallpaper and below every app, on every virtual desktop, out of Alt+Tab, and
+there after Win+D. They never activate when clicked.
+
+* **Calendar** -- month grid, today in the accent colour; chevrons or the wheel
+  change month, clicking the title returns to today.
+* **Now playing** -- the Windows media session (Spotify, browsers, ...): cover,
+  title, artist, prev / play-pause / next, click-to-seek progress bar. Fades
+  out when nothing has a session. The WinRT calls run on their own MTA thread;
+  the UI thread only draws.
+
+Drag a card to move it (grid + screen-edge snapping, position saved in the
+mod's storage). Right-click for **Lock positions** (then only Alt+drag moves)
+and **Reset positions**.
 
 ## Workflow
 
