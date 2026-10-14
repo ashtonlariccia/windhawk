@@ -90,8 +90,10 @@ version** setting is an escape hatch for when a future build needs a new ID.
 // ==WindhawkModSettings==
 /*
 - PagerEnabled: true
-  $name: Pager pill
-  $description: Show the desktop pager on the taskbar.
+  $name: Show desktop pager on the taskbar
+  $description: >-
+    The pager pill at the left of the taskbar. Applies live; the keybinds
+    below work either way.
 - KeySwitch: true
   $name: "Keybind: Win+1 ... Win+0 switches desktop"
 - KeyNew: true
@@ -3179,6 +3181,91 @@ static void StartKeybinds() {
 }
 
 // =============================================================================
+// Command window
+// =============================================================================
+
+// Lets other mods in explorer drive the desktops through the same queue as the
+// pager and the keybinds. The Widgets mod's top bar pager posts
+// kCommandSwitch, with the zero-based desktop index in wParam, to this
+// message-only window, found by its class name. Runs whatever the settings, so
+// the top bar works with the taskbar pager and every keybind switched off.
+
+static constexpr PCWSTR kCommandClass = L"WhDesktopsCommand";
+static constexpr UINT kCommandSwitch = WM_APP + 1;
+
+static std::thread g_commandThread;
+static std::atomic<DWORD> g_commandThreadId;
+
+static LRESULT CALLBACK CommandWndProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                       LPARAM lParam) {
+    if (msg == kCommandSwitch) {
+        int index = static_cast<int>(wParam);
+        if (index >= 0 && index < 1000) {
+            QueueDesktopAction({DesktopActionType::SwitchToIndex, index});
+        }
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static void CommandThreadProc(HANDLE readyEvent) {
+    MSG msg;
+    PeekMessage(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    g_commandThreadId = GetCurrentThreadId();
+
+    // Our own module: the window procedure lives in this DLL.
+    HMODULE module = nullptr;
+    GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                      reinterpret_cast<LPCWSTR>(&CommandWndProc), &module);
+
+    WNDCLASSEX wc{sizeof(wc)};
+    wc.lpfnWndProc = CommandWndProc;
+    wc.hInstance = module;
+    wc.lpszClassName = kCommandClass;
+    RegisterClassEx(&wc);
+    HWND hwnd = CreateWindowEx(0, kCommandClass, L"", 0, 0, 0, 0, 0,
+                               HWND_MESSAGE, nullptr, module, nullptr);
+    if (!hwnd) {
+        VDPLOG(L"Command window failed: %u", GetLastError());
+    }
+    SetEvent(readyEvent);
+
+    while (GetMessage(&msg, nullptr, 0, 0) > 0) {
+        DispatchMessage(&msg);
+    }
+
+    if (hwnd) {
+        DestroyWindow(hwnd);
+    }
+    UnregisterClass(kCommandClass, module);
+    g_commandThreadId = 0;
+}
+
+static void StartCommandWindow() {
+    if (g_commandThread.joinable()) {
+        return;
+    }
+    HANDLE readyEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!readyEvent) {
+        return;
+    }
+    g_commandThread = std::thread(CommandThreadProc, readyEvent);
+    WaitForSingleObject(readyEvent, INFINITE);
+    CloseHandle(readyEvent);
+}
+
+static void StopCommandWindow() {
+    if (!g_commandThread.joinable()) {
+        return;
+    }
+    if (DWORD id = g_commandThreadId) {
+        PostThreadMessage(id, WM_QUIT, 0, 0);
+    }
+    g_commandThread.join();
+}
+
+// =============================================================================
 // Mod entry points
 // =============================================================================
 
@@ -3220,6 +3307,7 @@ BOOL Wh_ModInit() {
     g_workerThread = std::thread(WorkerThreadProc);
 
     StartKeybinds();
+    StartCommandWindow();
 
     return TRUE;
 }
@@ -3297,6 +3385,7 @@ void Wh_ModBeforeUninit() {
 
     StopWatchingAccentColor();
     StopKeybinds();
+    StopCommandWindow();
 
     g_workerStop = true;
     if (g_workerWakeEvent) {

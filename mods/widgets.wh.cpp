@@ -6,7 +6,7 @@
 // @author          ashtonlariccia
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -luser32 -lgdi32 -ladvapi32 -lole32 -loleaut32 -lruntimeobject -ld2d1 -ldwrite -lwindowscodecs -lshcore -lws2_32 -ldwmapi -lshell32 -lcoremessaging
+// @compilerOptions -luser32 -lgdi32 -ladvapi32 -lole32 -loleaut32 -lruntimeobject -ld2d1 -ldwrite -lwindowscodecs -lshcore -lws2_32 -ldwmapi -lshell32 -lcoremessaging -ld3d11 -lwlanapi -liphlpapi -lwbemuuid -luuid
 // ==/WindhawkMod==
 
 // Source code is published under The GNU General Public License v3.0.
@@ -65,8 +65,15 @@ only a faint "Nothing listening on port N", or hides if set to.
 A glass bar along the top of the main screen: the cards' colour and border
 over a blur, with the same rounded corners as an ordinary window, placed like
 the Shell Styler's taskbar pills. Maximized windows stop below it, as they do
-above the taskbar, and it hides while an app is fullscreen. It is empty for
-now; the desktop pager and the control center will move onto it.
+above the taskbar, and it hides while an app is fullscreen.
+
+On it, each with its own switch: the desktop pager at the left end (the
+current desktop in your accent colour; click a number to switch, which goes
+through the Desktops mod) and the date and time at the right, with the
+control center's network, volume and battery icons beside it. Click those for
+a panel: Wi-Fi and Bluetooth, volume and screen brightness, battery, and
+shortcuts to Settings, notifications and quick settings -- each with its own
+switch.
 
 ## Fading behind windows
 
@@ -159,6 +166,41 @@ takes the keyboard until you're done.
   $description: >-
     Off, the bar is just the card colour over whatever is behind it, exactly
     like the cards.
+- TopBarPager: true
+  $name: "Top bar: desktop pager"
+  $description: >-
+    Desktop numbers at the bar's left end, the current one in your accent
+    colour. Clicking one switches through the Desktops mod, so that needs to
+    be running.
+- TopBarClock: true
+  $name: "Top bar: date and time"
+  $description: At the bar's right end, in your regional time format.
+- TopBarDate: true
+  $name: "Top bar: show the date"
+- TopBarSeconds: false
+  $name: "Top bar: show seconds"
+- TopBarControlCenter: true
+  $name: "Top bar: control center"
+  $description: >-
+    Network, volume and battery icons left of the clock. Click them for a
+    panel with the items below.
+- TopBarCcWifi: true
+  $name: "Control center: Wi-Fi"
+  $description: Turns Wi-Fi on and off; the arrow opens the list of networks.
+- TopBarCcBluetooth: true
+  $name: "Control center: Bluetooth"
+- TopBarCcVolume: true
+  $name: "Control center: volume"
+  $description: A slider for the default output device; the speaker mutes.
+- TopBarCcBrightness: true
+  $name: "Control center: brightness"
+  $description: Only shows for a built-in screen.
+- TopBarCcBattery: true
+  $name: "Control center: battery"
+- TopBarCcActions: true
+  $name: "Control center: quick actions"
+  $description: >-
+    Settings, notifications and the Windows quick settings.
 - Theme: auto
   $name: Theme
   $options:
@@ -199,9 +241,17 @@ takes the keyboard until you're done.
 #include <windowsx.h>
 
 #include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
 #include <dwmapi.h>
 #include <dwrite.h>
+#include <endpointvolume.h>
+#include <iphlpapi.h>
+#include <mmdeviceapi.h>
+#include <netlistmgr.h>
 #include <shellapi.h>
+#include <wbemidl.h>
+#include <wlanapi.h>
 #include <shellscalingapi.h>
 #include <wincodec.h>
 
@@ -212,7 +262,9 @@ takes the keyboard until you're done.
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Devices.Radios.h>
 #include <winrt/Windows.Foundation.Numerics.h>
+#include <winrt/Windows.Graphics.DirectX.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.System.h>
@@ -223,6 +275,7 @@ takes the keyboard until you're done.
 #include <atomic>
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -265,6 +318,17 @@ struct Settings {
     float topBarOpacity = 0;  // 0 = the cards' background opacity
     bool topBarBlur = true;
     float topBarCornerRadius = 8;
+    bool topBarPager = true;
+    bool topBarClock = true;
+    bool topBarDate = true;
+    bool topBarSeconds = false;
+    bool topBarControlCenter = true;
+    bool ccWifi = true;
+    bool ccBluetooth = true;
+    bool ccVolume = true;
+    bool ccBrightness = true;
+    bool ccBattery = true;
+    bool ccActions = true;
 };
 
 Settings g_settings;
@@ -320,6 +384,17 @@ void LoadSettings() {
     s.topBarOpacity = std::clamp(Wh_GetIntSetting(L"TopBarOpacity"), 0, 100) / 100.0f;
     s.topBarBlur = Wh_GetIntSetting(L"TopBarBlur");
     s.topBarCornerRadius = (float)std::clamp(Wh_GetIntSetting(L"TopBarCornerRadius"), 0, 100);
+    s.topBarPager = Wh_GetIntSetting(L"TopBarPager");
+    s.topBarClock = Wh_GetIntSetting(L"TopBarClock");
+    s.topBarDate = Wh_GetIntSetting(L"TopBarDate");
+    s.topBarSeconds = Wh_GetIntSetting(L"TopBarSeconds");
+    s.topBarControlCenter = Wh_GetIntSetting(L"TopBarControlCenter");
+    s.ccWifi = Wh_GetIntSetting(L"TopBarCcWifi");
+    s.ccBluetooth = Wh_GetIntSetting(L"TopBarCcBluetooth");
+    s.ccVolume = Wh_GetIntSetting(L"TopBarCcVolume");
+    s.ccBrightness = Wh_GetIntSetting(L"TopBarCcBrightness");
+    s.ccBattery = Wh_GetIntSetting(L"TopBarCcBattery");
+    s.ccActions = Wh_GetIntSetting(L"TopBarCcActions");
     g_settings = std::move(s);
 
     g_locked = Wh_GetIntValue(L"Locked", 0) != 0;
@@ -334,6 +409,8 @@ constexpr UINT WM_APP_QUIT = WM_APP + 2;
 constexpr UINT WM_APP_MEDIA = WM_APP + 3;
 constexpr UINT WM_APP_SOCKET = WM_APP + 4;
 constexpr UINT WM_APP_APPBAR = WM_APP + 5;
+constexpr UINT WM_APP_DESKTOPS = WM_APP + 6;
+constexpr UINT WM_APP_STATUS = WM_APP + 7;
 
 constexpr UINT_PTR kTimerTick = 2;
 constexpr UINT_PTR kTimerConnect = 3;
@@ -344,11 +421,17 @@ constexpr UINT_PTR kTimerPalette = 11;
 constexpr UINT_PTR kTimerDisplay = 12;
 constexpr UINT_PTR kTimerFocus = 13;
 constexpr UINT_PTR kTimerTopBar = 14;
+constexpr UINT_PTR kTimerClock = 15;
+constexpr UINT_PTR kTimerNetwork = 16;
+constexpr UINT_PTR kTimerPanelHide = 17;
+constexpr UINT_PTR kTimerBattery = 18;
+constexpr UINT_PTR kTimerBatteryLate = 19;
 
 constexpr PCWSTR kHostClass = L"WhWidgetsHost";
 constexpr PCWSTR kWidgetClass = L"WhWidget";
 constexpr PCWSTR kInputClass = L"WhWidgetInput";
 constexpr PCWSTR kTopBarClass = L"WhWidgetsTopBar";
+constexpr PCWSTR kPanelClass = L"WhWidgetsControlCenter";
 
 // Every fade, hover and slide takes this long -- quick on purpose.
 constexpr float kAnimMs = 100.0f;
@@ -383,7 +466,8 @@ int g_rtGeneration = 0;
 
 struct Fonts {
     com_ptr<IDWriteTextFormat> title, body, bodyEllipsis, titleEllipsis, small,
-        smallRight, weekday, day, dayBold, icon, iconBig, mono, hint;
+        smallRight, weekday, day, dayBold, icon, iconBig, mono, hint, barDesktop, barClock,
+        barIcon, barBattery, barPercent, panelTitle, panelIcon, panelBattery;
     std::wstring monoFamily;
 } g_fonts;
 
@@ -538,6 +622,15 @@ void CreateFonts() {
     f.icon = MakeFormat(icons, 13, DWRITE_FONT_WEIGHT_NORMAL, C);
     f.iconBig = MakeFormat(icons, 18, DWRITE_FONT_WEIGHT_NORMAL, C);
     f.hint = MakeFormat(t, 12, DWRITE_FONT_WEIGHT_NORMAL, C, true);
+    f.barDesktop = MakeFormat(t, 13, DWRITE_FONT_WEIGHT_SEMI_BOLD, C);
+    f.barClock = MakeFormat(t, 13, DWRITE_FONT_WEIGHT_MEDIUM, R);
+    f.barIcon = MakeFormat(icons, 14, DWRITE_FONT_WEIGHT_NORMAL, C);
+    // The battery glyphs are long and thin, drawn small inside their box.
+    f.barBattery = MakeFormat(icons, 20, DWRITE_FONT_WEIGHT_NORMAL, C);
+    f.panelBattery = MakeFormat(icons, 22, DWRITE_FONT_WEIGHT_NORMAL, C);
+    f.barPercent = MakeFormat(t, 13, DWRITE_FONT_WEIGHT_MEDIUM, L);
+    f.panelTitle = MakeFormat(t, 13, DWRITE_FONT_WEIGHT_SEMI_BOLD, L, true);
+    f.panelIcon = MakeFormat(icons, 16, DWRITE_FONT_WEIGHT_NORMAL, C);
     f.monoFamily = FontExists(L"Cascadia Mono") ? L"Cascadia Mono" : L"Consolas";
     f.mono = MakeFormat(f.monoFamily.c_str(), g_settings.outputFontSize,
                         DWRITE_FONT_WEIGHT_NORMAL, L);
@@ -1457,7 +1550,7 @@ struct CalendarWidget : Widget {
                    {titleRect.left + 8, titleRect.top, titleRect.right, titleRect.bottom},
                    g_pal.text);
 
-        const wchar_t* glyphs[] = {L"", L""};
+        const wchar_t* glyphs[] = {L"\uE76B", L"\uE76C"};
         for (int id : {kPrev, kNext}) {
             D2D1_RECT_F r = ButtonRect(id);
             if (hover[id] > 0) {
@@ -2035,7 +2128,7 @@ struct NowPlayingWidget : Widget {
             DrawArt(rt, art.get(), artRect, t);
         } else {
             Fill(rt, artRect, 8, WithAlpha(g_pal.hover, previousArt ? t : 1));
-            DrawString(rt, g_fonts.iconBig.get(), L"", artRect,
+            DrawString(rt, g_fonts.iconBig.get(), L"\uE8D6", artRect,
                        WithAlpha(g_pal.text3, previousArt ? t : 1));
         }
 
@@ -2052,8 +2145,8 @@ struct NowPlayingWidget : Widget {
         DrawString(rt, g_fonts.bodyEllipsis.get(), state.artist,
                    {x, kPad + 21, right, kPad + 40}, g_pal.text2);
 
-        const wchar_t* glyphs[] = {L"", state.playing ? L"" : L"",
-                                   L""};
+        const wchar_t* glyphs[] = {L"\uE892", state.playing ? L"\uE769" : L"\uE768",
+                                   L"\uE893"};
         for (int id : {kPrev, kToggle, kNext}) {
             D2D1_RECT_F r = ButtonRect(id);
             bool enabled = Enabled(id);
@@ -3273,6 +3366,25 @@ bool g_fullscreen;  // hidden for a fullscreen app
 RECT g_rect;        // the rectangle the bar last settled on
 UINT g_taskbarCreated;
 
+// The pager and clock layer, further down.
+void RenderContent();
+void PlaceContent();
+void CreateContent();
+void DestroyContent();
+void SyncContent();
+HWND CreateBandWindow(DWORD exStyle, PCWSTR className, HWND owner);
+bool ContentMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+// The control center, further down still.
+void TogglePanel();
+void ClosePanel();
+void RenderPanel();
+void LayoutPanel();
+void UpdatePanelBrushes();
+void DestroyPanel();
+extern bool g_panelOpen;
+PCWSTR VolumeGlyph();
+std::wstring BatteryGlyph();
+
 // A compositor needs a DispatcherQueue on its thread. Created with the first
 // bar and kept until the UI thread ends, so toggling the bar doesn't stack
 // queues; it also makes the thread a COM STA, which nothing else here minds.
@@ -3347,6 +3459,9 @@ void UpdateBrushes() {
     } catch (...) {
         Wh_Log(L"Top bar brushes failed: %08X", winrt::to_hresult());
     }
+    RenderContent();  // its colours come from the same palette
+    UpdatePanelBrushes();
+    RenderPanel();
 }
 
 // Sizes the pill to the window, in physical pixels, which is what a desktop
@@ -3432,6 +3547,1937 @@ void ReleaseVisuals() {
     g_compositor = nullptr;
 }
 
+// -----------------------------------------------------------------------------
+// System status, for the control center: network, volume, battery, screen
+// brightness and the radios.
+//
+// Volume and battery push their changes (an endpoint-volume callback and
+// power-setting notifications); the network is polled every few seconds,
+// which costs next to nothing. Brightness (WMI) and the radios
+// (Windows.Devices.Radios) can block for a while, so they run on a worker
+// thread of their own and post back to the bar.
+
+enum class NetKind { None, Wifi, Ethernet };
+
+struct Status {
+    NetKind net = NetKind::None;
+    int signal = 0;  // Wi-Fi link quality, 0-100
+    std::wstring ssid;
+    bool internet = false;
+
+    bool volumeAvailable = false;
+    float volume = 0;
+    bool muted = false;
+    std::wstring device;
+
+    bool battery = false;
+    int batteryPercent = 0;
+    bool charging = false;
+    bool pluggedIn = false;
+    int batterySeconds = -1;
+
+    // From the worker; -1 while unknown or not there.
+    int brightness = -1;  // 0-100; stays -1 without a built-in screen
+    int wifiRadio = -1;   // 0 off, 1 on
+    int bluetoothRadio = -1;
+};
+
+Status g_status;
+bool g_statusOn;
+HWND g_statusHwnd;  // the bar, for the callbacks and the worker to post to
+
+constexpr WPARAM kStatusVolume = 1;
+constexpr WPARAM kStatusDevice = 2;
+constexpr WPARAM kStatusControls = 3;
+
+void PostStatus(WPARAM what) {
+    if (HWND bar = g_statusHwnd) {
+        PostMessageW(bar, WM_APP_STATUS, what, 0);
+    }
+}
+
+// --- Volume (UI thread; the callbacks arrive on the audio service's threads)
+
+struct VolumeCallback : IAudioEndpointVolumeCallback {
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback)) {
+            *out = this;
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA) override {
+        PostStatus(kStatusVolume);
+        return S_OK;
+    }
+} g_volumeCallback;
+
+struct DeviceCallback : IMMNotificationClient {
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IMMNotificationClient)) {
+            *out = this;
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
+        if (flow == eRender && role == eConsole) {
+            PostStatus(kStatusDevice);
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override {
+        return S_OK;
+    }
+} g_deviceCallback;
+
+// PKEY_Device_FriendlyName, defined here rather than linked.
+constexpr PROPERTYKEY kDeviceFriendlyName = {
+    {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
+
+com_ptr<IMMDeviceEnumerator> g_devices;
+com_ptr<IAudioEndpointVolume> g_endpoint;
+
+void ReadVolume() {
+    float level;
+    BOOL muted;
+    if (g_endpoint && SUCCEEDED(g_endpoint->GetMasterVolumeLevelScalar(&level)) &&
+        SUCCEEDED(g_endpoint->GetMute(&muted))) {
+        g_status.volume = level;
+        g_status.muted = muted;
+        g_status.volumeAvailable = true;
+    }
+}
+
+void ReleaseEndpoint() {
+    if (g_endpoint) {
+        g_endpoint->UnregisterControlChangeNotify(&g_volumeCallback);
+        g_endpoint = nullptr;
+    }
+    g_status.volumeAvailable = false;
+    g_status.device.clear();
+}
+
+// The default output device, again whenever it changes.
+void OpenEndpoint() {
+    ReleaseEndpoint();
+    if (!g_devices) {
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                    IID_PPV_ARGS(g_devices.put())))) {
+            return;
+        }
+        g_devices->RegisterEndpointNotificationCallback(&g_deviceCallback);
+    }
+    com_ptr<IMMDevice> device;
+    if (FAILED(g_devices->GetDefaultAudioEndpoint(eRender, eConsole, device.put())) ||
+        FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
+                                g_endpoint.put_void()))) {
+        g_endpoint = nullptr;
+        return;
+    }
+    g_endpoint->RegisterControlChangeNotify(&g_volumeCallback);
+    com_ptr<IPropertyStore> props;
+    if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, props.put()))) {
+        PROPVARIANT name;
+        PropVariantInit(&name);
+        if (SUCCEEDED(props->GetValue(kDeviceFriendlyName, &name)) && name.vt == VT_LPWSTR) {
+            g_status.device = name.pwszVal;
+        }
+        PropVariantClear(&name);
+    }
+    ReadVolume();
+}
+
+void SetVolume(float level) {
+    if (!g_endpoint) {
+        return;
+    }
+    level = std::clamp(level, 0.0f, 1.0f);
+    g_endpoint->SetMasterVolumeLevelScalar(level, nullptr);
+    if (g_status.muted && level > 0) {
+        g_endpoint->SetMute(FALSE, nullptr);
+    }
+    g_status.volume = level;
+}
+
+void ToggleMute() {
+    if (g_endpoint) {
+        g_endpoint->SetMute(!g_status.muted, nullptr);
+        g_status.muted = !g_status.muted;
+    }
+}
+
+// --- Network (UI thread, polled)
+
+// {DCB00C01-570F-4A9B-8D69-199FDBA5723B}
+constexpr GUID kNetworkListManager = {
+    0xDCB00C01, 0x570F, 0x4A9B, {0x8D, 0x69, 0x19, 0x9F, 0xDB, 0xA5, 0x72, 0x3B}};
+
+HANDLE g_wlan;
+com_ptr<INetworkListManager> g_networks;
+
+// True when anything shown changed.
+bool ReadNetwork() {
+    NetKind kind = NetKind::None;
+    int signal = 0;
+    std::wstring ssid;
+
+    if (!g_wlan) {
+        DWORD version;
+        if (WlanOpenHandle(2, nullptr, &version, &g_wlan) != ERROR_SUCCESS) {
+            g_wlan = nullptr;
+        }
+    }
+    if (g_wlan) {
+        PWLAN_INTERFACE_INFO_LIST list = nullptr;
+        if (WlanEnumInterfaces(g_wlan, nullptr, &list) == ERROR_SUCCESS) {
+            for (DWORD i = 0; i < list->dwNumberOfItems && kind == NetKind::None; i++) {
+                const auto& info = list->InterfaceInfo[i];
+                if (info.isState != wlan_interface_state_connected) {
+                    continue;
+                }
+                DWORD size = 0;
+                PWLAN_CONNECTION_ATTRIBUTES connection = nullptr;
+                WLAN_OPCODE_VALUE_TYPE type;
+                if (WlanQueryInterface(g_wlan, &info.InterfaceGuid,
+                                       wlan_intf_opcode_current_connection, nullptr, &size,
+                                       reinterpret_cast<PVOID*>(&connection),
+                                       &type) == ERROR_SUCCESS) {
+                    kind = NetKind::Wifi;
+                    signal = (int)connection->wlanAssociationAttributes.wlanSignalQuality;
+                    const auto& raw = connection->wlanAssociationAttributes.dot11Ssid;
+                    wchar_t name[64] = L"";
+                    int n = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<LPCCH>(raw.ucSSID),
+                                                (int)raw.uSSIDLength, name, ARRAYSIZE(name) - 1);
+                    ssid.assign(name, std::max(n, 0));
+                    WlanFreeMemory(connection);
+                }
+            }
+            WlanFreeMemory(list);
+        }
+    }
+
+    // Wired: a physical Ethernet adapter that's up (not Hyper-V's or a VPN's).
+    if (kind == NetKind::None) {
+        PMIB_IF_TABLE2 table = nullptr;
+        if (GetIfTable2(&table) == NO_ERROR) {
+            for (ULONG i = 0; i < table->NumEntries; i++) {
+                const auto& row = table->Table[i];
+                if (row.Type == IF_TYPE_ETHERNET_CSMACD && row.OperStatus == IfOperStatusUp &&
+                    row.MediaConnectState == MediaConnectStateConnected &&
+                    row.InterfaceAndOperStatusFlags.HardwareInterface) {
+                    kind = NetKind::Ethernet;
+                    break;
+                }
+            }
+            FreeMibTable(table);
+        }
+    }
+
+    bool internet = false;
+    if (!g_networks) {
+        CoCreateInstance(kNetworkListManager, nullptr, CLSCTX_ALL,
+                         IID_PPV_ARGS(g_networks.put()));
+    }
+    NLM_CONNECTIVITY connectivity;
+    if (g_networks && SUCCEEDED(g_networks->GetConnectivity(&connectivity))) {
+        internet = connectivity & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET);
+    }
+
+    // Signal in quarters, which is all the icon shows.
+    bool changed = kind != g_status.net || ssid != g_status.ssid ||
+                   internet != g_status.internet || signal / 25 != g_status.signal / 25;
+    g_status.net = kind;
+    g_status.signal = signal;
+    g_status.ssid = ssid;
+    g_status.internet = internet;
+    return changed;
+}
+
+// --- Battery (UI thread, pushed by power-setting notifications)
+
+// GUID_BATTERY_PERCENTAGE_REMAINING and GUID_ACDC_POWER_SOURCE.
+constexpr GUID kBatteryPercentage = {
+    0xA7AD8041, 0xB45A, 0x4CAE, {0x87, 0xA3, 0xEE, 0xCB, 0xB4, 0x68, 0xA9, 0xE1}};
+constexpr GUID kPowerSource = {
+    0x5D3E9A59, 0xE9D5, 0x4B00, {0xA6, 0xBD, 0xFF, 0x34, 0xFF, 0x51, 0x65, 0x48}};
+
+HPOWERNOTIFY g_powerNotify[2];
+
+// True when anything shown changed.
+bool ReadBattery() {
+    SYSTEM_POWER_STATUS power;
+    if (!GetSystemPowerStatus(&power)) {
+        return false;
+    }
+    Status before = g_status;
+    g_status.battery = !(power.BatteryFlag & 128) && power.BatteryFlag != 255 &&
+                       power.BatteryLifePercent <= 100;
+    g_status.batteryPercent = power.BatteryLifePercent <= 100 ? power.BatteryLifePercent : 0;
+    g_status.pluggedIn = power.ACLineStatus == 1;
+    g_status.charging = (power.BatteryFlag & 8) != 0;
+    g_status.batterySeconds =
+        power.BatteryLifeTime == (DWORD)-1 ? -1 : (int)power.BatteryLifeTime;
+    return before.battery != g_status.battery ||
+           before.batteryPercent != g_status.batteryPercent ||
+           before.pluggedIn != g_status.pluggedIn || before.charging != g_status.charging ||
+           before.batterySeconds / 60 != g_status.batterySeconds / 60;
+}
+
+// --- Worker: brightness and the radios
+
+namespace wdr = winrt::Windows::Devices::Radios;
+
+std::thread g_worker;
+HANDLE g_workerEvent;
+std::mutex g_workerMutex;
+std::deque<std::function<void()>> g_workerJobs;  // guarded by g_workerMutex
+bool g_workerStop;                                // guarded by g_workerMutex
+struct {
+    int brightness = -1, wifi = -1, bluetooth = -1;
+} g_workerResult;  // guarded by g_workerMutex
+std::atomic<int> g_brightnessWanted{-1};  // the latest slider value, applied once
+
+// Only ever touched on the worker.
+com_ptr<IWbemServices> g_wmi;
+std::wstring g_brightnessPath;
+com_ptr<IWbemClassObject> g_brightnessParams;
+std::vector<wdr::Radio> g_radios;
+bool g_radiosLoaded;
+
+void RunOnWorker(std::function<void()> job) {
+    if (!g_worker.joinable()) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_workerMutex);
+        g_workerJobs.push_back(std::move(job));
+    }
+    SetEvent(g_workerEvent);
+}
+
+struct Bstr {
+    BSTR s;
+    explicit Bstr(PCWSTR text) : s(SysAllocString(text)) {}
+    ~Bstr() { SysFreeString(s); }
+    operator BSTR() const { return s; }
+};
+
+bool EnsureWmi() {
+    if (g_wmi) {
+        return true;
+    }
+    com_ptr<IWbemLocator> locator;
+    if (FAILED(CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IWbemLocator, locator.put_void())) ||
+        FAILED(locator->ConnectServer(Bstr(L"ROOT\\WMI"), nullptr, nullptr, nullptr, 0,
+                                      nullptr, nullptr, g_wmi.put()))) {
+        g_wmi = nullptr;
+        return false;
+    }
+    CoSetProxyBlanket(g_wmi.get(), RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr,
+                      RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
+    return true;
+}
+
+com_ptr<IWbemClassObject> WmiFirst(PCWSTR query) {
+    com_ptr<IEnumWbemClassObject> results;
+    com_ptr<IWbemClassObject> first;
+    ULONG count = 0;
+    if (EnsureWmi() &&
+        SUCCEEDED(g_wmi->ExecQuery(Bstr(L"WQL"), Bstr(query),
+                                   WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                                   nullptr, results.put())) &&
+        results->Next(3000, 1, first.put(), &count) == S_OK && count == 1) {
+        return first;
+    }
+    return nullptr;
+}
+
+// -1 without a screen whose brightness software can set (an external
+// monitor, a desktop PC).
+int ReadBrightness() {
+    auto monitor = WmiFirst(L"SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active=TRUE");
+    if (!monitor) {
+        return -1;
+    }
+    VARIANT value;
+    VariantInit(&value);
+    int result = -1;
+    if (SUCCEEDED(monitor->Get(L"CurrentBrightness", 0, &value, nullptr, nullptr))) {
+        result = value.vt == VT_UI1 ? value.bVal : value.vt == VT_I4 ? (int)value.lVal : -1;
+    }
+    VariantClear(&value);
+    return result;
+}
+
+void ApplyBrightness(int level) {
+    if (g_brightnessPath.empty()) {
+        auto methods = WmiFirst(L"SELECT * FROM WmiMonitorBrightnessMethods WHERE Active=TRUE");
+        com_ptr<IWbemClassObject> cls;
+        if (!methods ||
+            FAILED(g_wmi->GetObject(Bstr(L"WmiMonitorBrightnessMethods"), 0, nullptr,
+                                    cls.put(), nullptr)) ||
+            FAILED(cls->GetMethod(L"WmiSetBrightness", 0, g_brightnessParams.put(), nullptr))) {
+            return;
+        }
+        VARIANT path;
+        VariantInit(&path);
+        if (SUCCEEDED(methods->Get(L"__PATH", 0, &path, nullptr, nullptr)) && path.vt == VT_BSTR) {
+            g_brightnessPath = path.bstrVal;
+        }
+        VariantClear(&path);
+        if (g_brightnessPath.empty()) {
+            return;
+        }
+    }
+    com_ptr<IWbemClassObject> params;
+    if (!g_brightnessParams || FAILED(g_brightnessParams->SpawnInstance(0, params.put()))) {
+        return;
+    }
+    VARIANT timeout;
+    timeout.vt = VT_I4;
+    timeout.lVal = 0;
+    params->Put(L"Timeout", 0, &timeout, 0);
+    VARIANT brightness;
+    brightness.vt = VT_UI1;
+    brightness.bVal = (BYTE)std::clamp(level, 0, 100);
+    params->Put(L"Brightness", 0, &brightness, 0);
+    g_wmi->ExecMethod(Bstr(g_brightnessPath.c_str()), Bstr(L"WmiSetBrightness"), 0, nullptr,
+                      params.get(), nullptr, nullptr);
+}
+
+void LoadRadios() {
+    if (g_radiosLoaded) {
+        return;
+    }
+    g_radiosLoaded = true;
+    try {
+        wdr::Radio::RequestAccessAsync().get();
+        for (const auto& radio : wdr::Radio::GetRadiosAsync().get()) {
+            g_radios.push_back(radio);
+        }
+    } catch (...) {
+        Wh_Log(L"Radios unavailable: %08X", winrt::to_hresult());
+    }
+}
+
+int RadioState(wdr::RadioKind kind) {
+    int state = -1;
+    for (const auto& radio : g_radios) {
+        try {
+            if (radio.Kind() == kind) {
+                state = std::max(state, radio.State() == wdr::RadioState::On ? 1 : 0);
+            }
+        } catch (...) {
+        }
+    }
+    return state;
+}
+
+void SetRadio(wdr::RadioKind kind, bool on) {
+    for (const auto& radio : g_radios) {
+        try {
+            if (radio.Kind() == kind) {
+                radio.SetStateAsync(on ? wdr::RadioState::On : wdr::RadioState::Off).get();
+            }
+        } catch (...) {
+            Wh_Log(L"Radio switch failed: %08X", winrt::to_hresult());
+        }
+    }
+}
+
+// Reads brightness and both radios and posts them to the bar.
+void RefreshControls() {
+    LoadRadios();
+    int brightness = ReadBrightness();
+    int wifi = RadioState(wdr::RadioKind::WiFi);
+    int bluetooth = RadioState(wdr::RadioKind::Bluetooth);
+    {
+        std::lock_guard<std::mutex> lock(g_workerMutex);
+        g_workerResult.brightness = brightness;
+        g_workerResult.wifi = wifi;
+        g_workerResult.bluetooth = bluetooth;
+    }
+    PostStatus(kStatusControls);
+}
+
+void WorkerProc() {
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    while (true) {
+        WaitForSingleObject(g_workerEvent, INFINITE);
+        std::deque<std::function<void()>> jobs;
+        {
+            std::lock_guard<std::mutex> lock(g_workerMutex);
+            if (g_workerStop) {
+                break;
+            }
+            jobs.swap(g_workerJobs);
+        }
+        for (auto& job : jobs) {
+            try {
+                job();
+            } catch (...) {
+                Wh_Log(L"Control center job failed: %08X", winrt::to_hresult());
+            }
+        }
+    }
+    g_radios.clear();
+    g_radiosLoaded = false;
+    g_brightnessParams = nullptr;
+    g_brightnessPath.clear();
+    g_wmi = nullptr;
+    winrt::uninit_apartment();
+}
+
+// Drags of the brightness slider queue many of these; only the latest value
+// is applied, once.
+void QueueBrightness(int level) {
+    g_brightnessWanted = level;
+    RunOnWorker([] {
+        int level = g_brightnessWanted.exchange(-1);
+        if (level >= 0) {
+            ApplyBrightness(level);
+        }
+    });
+}
+
+// --- Lifetime
+
+void StartStatus() {
+    if (g_statusOn || !g_hwnd) {
+        return;
+    }
+    g_statusOn = true;
+    g_statusHwnd = g_hwnd;
+    OpenEndpoint();
+    ReadNetwork();
+    ReadBattery();
+    g_powerNotify[0] = RegisterPowerSettingNotification(g_hwnd, &kBatteryPercentage,
+                                                        DEVICE_NOTIFY_WINDOW_HANDLE);
+    g_powerNotify[1] = RegisterPowerSettingNotification(g_hwnd, &kPowerSource,
+                                                        DEVICE_NOTIFY_WINDOW_HANDLE);
+    SetTimer(g_hwnd, kTimerNetwork, 4000, nullptr);
+
+    g_workerEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    g_workerStop = false;
+    if (g_workerEvent) {
+        g_worker = std::thread(WorkerProc);
+        RunOnWorker(RefreshControls);
+    }
+}
+
+void StopStatus() {
+    if (!g_statusOn) {
+        return;
+    }
+    g_statusOn = false;
+    if (g_hwnd) {
+        KillTimer(g_hwnd, kTimerNetwork);
+        KillTimer(g_hwnd, kTimerBattery);
+        KillTimer(g_hwnd, kTimerBatteryLate);
+    }
+    for (auto& notify : g_powerNotify) {
+        if (notify) {
+            UnregisterPowerSettingNotification(notify);
+            notify = nullptr;
+        }
+    }
+    ReleaseEndpoint();
+    if (g_devices) {
+        g_devices->UnregisterEndpointNotificationCallback(&g_deviceCallback);
+        g_devices = nullptr;
+    }
+    g_networks = nullptr;
+    if (g_wlan) {
+        WlanCloseHandle(g_wlan, nullptr);
+        g_wlan = nullptr;
+    }
+    if (g_worker.joinable()) {
+        {
+            std::lock_guard<std::mutex> lock(g_workerMutex);
+            g_workerStop = true;
+            g_workerJobs.clear();
+        }
+        SetEvent(g_workerEvent);
+        g_worker.join();
+    }
+    if (g_workerEvent) {
+        CloseHandle(g_workerEvent);
+        g_workerEvent = nullptr;
+    }
+    g_statusHwnd = nullptr;
+    g_status = Status{};
+}
+
+// -----------------------------------------------------------------------------
+// What's on the bar: the desktop pager at the left end, the date and time at
+// the right.
+//
+// Drawn with Direct2D into a composition drawing surface that is part of the
+// bar's own visual tree, not into a window of its own. A window with nothing
+// but composition content has no redirection surface for the desktop-switch
+// slide to copy, so nothing on the bar is duplicated sliding past underneath
+// its glass -- which is exactly what a separate layered window got.
+
+constexpr float kContentPad = 12;  // DIPs from the pill's ends to its content
+constexpr float kChipW = 22;       // one desktop number's hit area
+constexpr float kChipGap = 2;
+
+constexpr PCWSTR kVirtualDesktopsPath =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops";
+// The Desktops mod's command window; see its "Command window" section.
+constexpr PCWSTR kDesktopsCommandClass = L"WhDesktopsCommand";
+constexpr UINT kDesktopsCommandSwitch = WM_APP + 1;
+
+// Not declared by the toolchain (or only with the ABI types). Results are
+// passed back as plain pointers to the C++/WinRT objects' ABI.
+// {25297D5C-3AD4-4C9C-B5CF-E36A38512330}
+constexpr GUID IID_ICompositorInterop = {
+    0x25297D5C, 0x3AD4, 0x4C9C, {0xB5, 0xCF, 0xE3, 0x6A, 0x38, 0x51, 0x23, 0x30}};
+struct ICompositorInteropRaw : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE CreateCompositionSurfaceForHandle(HANDLE, void**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateCompositionSurfaceForSwapChain(IUnknown*, void**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateGraphicsDevice(IUnknown* device, void** result) = 0;
+};
+// {FD04E6E3-FE0C-4C3C-AB19-A07601A576EE}
+constexpr GUID IID_ICompositionDrawingSurfaceInterop = {
+    0xFD04E6E3, 0xFE0C, 0x4C3C, {0xAB, 0x19, 0xA0, 0x76, 0x01, 0xA5, 0x76, 0xEE}};
+struct ICompositionDrawingSurfaceInteropRaw : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE BeginDraw(const RECT* updateRect, REFIID iid,
+                                                void** updateObject, POINT* updateOffset) = 0;
+    virtual HRESULT STDMETHODCALLTYPE EndDraw() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Resize(SIZE sizePixels) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Scroll(const RECT*, const RECT*, int, int) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ResumeDraw() = 0;
+    virtual HRESULT STDMETHODCALLTYPE SuspendDraw() = 0;
+};
+
+bool g_contentOn;  // created, and something on it is switched on
+com_ptr<ID3D11Device> g_d3d;
+com_ptr<ID2D1Device> g_d2dDevice;
+wuc::CompositionGraphicsDevice g_graphics{nullptr};
+wuc::CompositionDrawingSurface g_surface{nullptr};
+wuc::SpriteVisual g_contentVisual{nullptr};
+SIZE g_surfaceSize{};
+// The control center panel's, drawn with the same device.
+wuc::CompositionDrawingSurface g_panelSurface{nullptr};
+SIZE g_panelSurfaceSize{};
+wuc::SpriteVisual g_panelContent{nullptr};
+
+// Explorer keeps the desktops' IDs, in order, and the current one's in the
+// registry; a change notification on that key says when either moves.
+int g_desktopCount = 1;
+int g_desktopCurrent = 0;
+HKEY g_vdKey;
+HANDLE g_vdEvent;
+HANDLE g_vdWait;
+
+std::vector<D2D1_RECT_F> g_chips;  // in DIPs within the pill, from the last render
+int g_hotChip = -1;
+D2D1_RECT_F g_statusRect{};  // the control center's icons, likewise
+bool g_hotStatus;
+bool g_trackingMouse;
+
+bool ContentWanted() {
+    return g_settings.topBarPager || g_settings.topBarClock || g_settings.topBarControlCenter;
+}
+
+// The pill inside the bar window, in pixels -- the same sums as Layout().
+D2D1_RECT_F PillRect(float s) {
+    RECT client;
+    GetClientRect(g_hwnd, &client);
+    float x = std::round(kSideMargin * s);
+    float y = std::round(kEdgeMargin * s);
+    float w = std::max(0.0f, client.right - 2 * x);
+    float h = std::round(g_settings.topBarHeight * s);
+    return D2D1::RectF(x, y, x + w, y + h);
+}
+
+bool ReadDesktops() {
+    int count = 1, current = 0;
+    BYTE ids[16 * 128];
+    DWORD size = sizeof(ids);
+    if (RegGetValueW(HKEY_CURRENT_USER, kVirtualDesktopsPath, L"VirtualDesktopIDs",
+                     RRF_RT_REG_BINARY, nullptr, ids, &size) == ERROR_SUCCESS &&
+        size >= 16) {
+        count = (int)(size / 16);
+        BYTE id[16];
+        DWORD idSize = sizeof(id);
+        if (RegGetValueW(HKEY_CURRENT_USER, kVirtualDesktopsPath, L"CurrentVirtualDesktop",
+                         RRF_RT_REG_BINARY, nullptr, id, &idSize) == ERROR_SUCCESS &&
+            idSize == 16) {
+            for (int i = 0; i < count; i++) {
+                if (memcmp(ids + 16 * i, id, 16) == 0) {
+                    current = i;
+                    break;
+                }
+            }
+        }
+    }
+    bool changed = count != g_desktopCount || current != g_desktopCurrent;
+    g_desktopCount = count;
+    g_desktopCurrent = current;
+    return changed;
+}
+
+// Runs on a thread-pool thread, so it only passes the news on.
+void CALLBACK OnDesktopsChanged(PVOID, BOOLEAN) {
+    if (HWND bar = g_hwnd) {
+        PostMessageW(bar, WM_APP_DESKTOPS, 0, 0);
+    }
+}
+
+// Notifications are one-shot; this re-arms after each.
+void WatchDesktops() {
+    if (!g_vdKey && RegOpenKeyExW(HKEY_CURRENT_USER, kVirtualDesktopsPath, 0,
+                                  KEY_NOTIFY | KEY_QUERY_VALUE, &g_vdKey) != ERROR_SUCCESS) {
+        g_vdKey = nullptr;
+        return;
+    }
+    if (!g_vdEvent) {
+        g_vdEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    }
+    if (!g_vdEvent) {
+        return;
+    }
+    RegNotifyChangeKeyValue(g_vdKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, g_vdEvent, TRUE);
+    if (!g_vdWait) {
+        RegisterWaitForSingleObject(&g_vdWait, g_vdEvent, OnDesktopsChanged, nullptr,
+                                    INFINITE, WT_EXECUTEDEFAULT);
+    }
+}
+
+void StopWatchingDesktops() {
+    if (g_vdWait) {
+        // Waits for a callback in flight, which must not outlive the module.
+        UnregisterWaitEx(g_vdWait, INVALID_HANDLE_VALUE);
+        g_vdWait = nullptr;
+    }
+    if (g_vdKey) {
+        RegCloseKey(g_vdKey);
+        g_vdKey = nullptr;
+    }
+    if (g_vdEvent) {
+        CloseHandle(g_vdEvent);
+        g_vdEvent = nullptr;
+    }
+}
+
+// Switching goes through the Desktops mod, which owns the virtual desktop
+// API and its slide; without it a click does nothing.
+void SwitchDesktop(int index) {
+    HWND command = FindWindowExW(HWND_MESSAGE, nullptr, kDesktopsCommandClass, nullptr);
+    if (!command || index == g_desktopCurrent) {
+        return;
+    }
+    PostMessageW(command, kDesktopsCommandSwitch, (WPARAM)index, 0);
+}
+
+std::wstring ClockText() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t date[64] = L"", time[64] = L"";
+    if (g_settings.topBarDate) {
+        GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &st, L"ddd MMM d", date,
+                        ARRAYSIZE(date), nullptr);
+    }
+    GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, g_settings.topBarSeconds ? 0 : TIME_NOSECONDS,
+                    &st, nullptr, time, ARRAYSIZE(time));
+    return date[0] ? std::wstring(date) + L"   " + time : std::wstring(time);
+}
+
+// Fires just after the next second or minute turns over.
+void ScheduleClock() {
+    if (!g_contentOn || !g_settings.topBarClock) {
+        return;
+    }
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    UINT ms = g_settings.topBarSeconds
+                  ? 1000 - st.wMilliseconds
+                  : (60 - st.wSecond) * 1000 - st.wMilliseconds;
+    SetTimer(g_hwnd, kTimerClock, ms + 15, nullptr);
+}
+
+void ReleaseGraphics() {
+    if (g_contentVisual) {
+        g_contentVisual.Brush(nullptr);
+    }
+    if (g_panelContent) {
+        g_panelContent.Brush(nullptr);
+    }
+    g_surface = nullptr;
+    g_surfaceSize = {};
+    g_panelSurface = nullptr;
+    g_panelSurfaceSize = {};
+    g_graphics = nullptr;
+    g_d2dDevice = nullptr;
+    g_d3d = nullptr;
+}
+
+// A D3D11 device (hardware, else WARP) under a Direct2D device, handed to
+// the compositor to draw surfaces with.
+bool EnsureGraphics() {
+    if (g_graphics) {
+        return true;
+    }
+    try {
+        UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
+                                       nullptr, 0, D3D11_SDK_VERSION, g_d3d.put(), nullptr,
+                                       nullptr);
+        if (FAILED(hr)) {
+            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, nullptr, 0,
+                                   D3D11_SDK_VERSION, g_d3d.put(), nullptr, nullptr);
+        }
+        winrt::check_hresult(hr);
+        auto dxgi = g_d3d.as<IDXGIDevice>();
+        auto factory = g_d2d.as<ID2D1Factory1>();
+        winrt::check_hresult(factory->CreateDevice(dxgi.get(), g_d2dDevice.put()));
+
+        com_ptr<ICompositorInteropRaw> interop;
+        winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(g_compositor))
+                                 ->QueryInterface(IID_ICompositorInterop, interop.put_void()));
+        winrt::check_hresult(
+            interop->CreateGraphicsDevice(g_d2dDevice.get(), winrt::put_abi(g_graphics)));
+        return true;
+    } catch (...) {
+        Wh_Log(L"Top bar graphics failed: %08X", winrt::to_hresult());
+        ReleaseGraphics();
+        return false;
+    }
+}
+
+float TextWidth(IDWriteTextFormat* format, const std::wstring& text) {
+    com_ptr<IDWriteTextLayout> layout;
+    if (!format || text.empty() ||
+        FAILED(g_dw->CreateTextLayout(text.c_str(), (UINT32)text.size(), format, 10000, 100,
+                                      layout.put()))) {
+        return 0;
+    }
+    DWRITE_TEXT_METRICS metrics;
+    layout->GetMetrics(&metrics);
+    return metrics.widthIncludingTrailingWhitespace;
+}
+
+void PaintContent(ID2D1RenderTarget* rt, float pillW, float pillH) {
+    g_chips.clear();
+    if (g_settings.topBarPager) {
+        float x = kContentPad;
+        for (int i = 0; i < g_desktopCount; i++) {
+            D2D1_RECT_F chip = D2D1::RectF(x, 0, x + kChipW, pillH);
+            g_chips.push_back(chip);
+            if (i == g_hotChip && i != g_desktopCurrent) {
+                float inset = std::max(3.0f, (pillH - 22) / 2);
+                Fill(rt, D2D1::RectF(chip.left, inset, chip.right, pillH - inset), 6,
+                     g_pal.hover);
+            }
+            DrawString(rt, g_fonts.barDesktop.get(), std::to_wstring(i + 1), chip,
+                       i == g_desktopCurrent ? g_pal.accent : g_pal.text2);
+            x += kChipW + kChipGap;
+        }
+    }
+
+    float right = pillW - kContentPad;
+    if (g_settings.topBarClock) {
+        std::wstring clock = ClockText();
+        DrawString(rt, g_fonts.barClock.get(), clock, D2D1::RectF(pillW / 2, 0, right, pillH),
+                   g_pal.text);
+        right -= TextWidth(g_fonts.barClock.get(), clock) + 22;
+    }
+
+    // The control center's icons, right to left: battery, volume, network.
+    g_statusRect = {};
+    if (g_settings.topBarControlCenter && g_statusOn) {
+        constexpr float kIconW = 20, kBatteryW = 26, kIconGap = 16;
+        std::wstring percent;
+        float percentW = 0;
+        if (g_status.battery) {
+            percent = std::to_wstring(g_status.batteryPercent) + L"%";
+            percentW = TextWidth(g_fonts.barPercent.get(), percent);
+        }
+        float width = 2 * kIconW + kIconGap + (g_status.battery ? kIconGap + kBatteryW + 4 + percentW : 0);
+        float inset = std::max(3.0f, (pillH - 22) / 2);
+        g_statusRect = D2D1::RectF(right - width - 10, inset, right + 10, pillH - inset);
+        if (g_hotStatus || g_panelOpen) {
+            Fill(rt, g_statusRect, 6, g_pal.hover);
+        }
+        float x = right;
+        if (g_status.battery) {
+            DrawString(rt, g_fonts.barPercent.get(), percent, D2D1::RectF(x - percentW, 0, x, pillH),
+                       g_pal.text);
+            x -= percentW + 4;
+            DrawString(rt, g_fonts.barBattery.get(), BatteryGlyph(),
+                       D2D1::RectF(x - kBatteryW, 0, x, pillH), g_pal.text);
+            x -= kBatteryW + kIconGap;
+        }
+        DrawString(rt, g_fonts.barIcon.get(), VolumeGlyph(), D2D1::RectF(x - kIconW, 0, x, pillH),
+                   g_pal.text);
+        x -= kIconW + kIconGap;
+        D2D1_RECT_F net = D2D1::RectF(x - kIconW, 0, x, pillH);
+        D2D1_COLOR_F color = g_status.internet ? g_pal.text : g_pal.text2;
+        if (g_status.net == NetKind::Wifi) {
+            // Windows' way: the full fan faint, the bars it has on top.
+            int quality = g_status.signal;
+            PCWSTR bars = quality < 25 ? L"\uE872" : quality < 50 ? L"\uE873"
+                          : quality < 75 ? L"\uE874" : L"\uE701";
+            DrawString(rt, g_fonts.barIcon.get(), L"\uE701", net, g_pal.text3);
+            DrawString(rt, g_fonts.barIcon.get(), bars, net, color);
+        } else if (g_status.net == NetKind::Ethernet) {
+            DrawString(rt, g_fonts.barIcon.get(), L"\uE839", net, color);
+        } else {
+            DrawString(rt, g_fonts.barIcon.get(), L"\uEB5E", net, g_pal.text2);
+        }
+    }
+}
+
+// Draws one surface, made or resized to fit rect (pixels, within its window),
+// with paint working in DIPs. One attempt; false when the device was lost and
+// has to be made again.
+bool DrawSurface(wuc::CompositionDrawingSurface& surface, SIZE& surfaceSize,
+                 const wuc::SpriteVisual& visual, D2D1_RECT_F pill, float s,
+                 void (*paint)(ID2D1RenderTarget*, float, float)) {
+    float w = pill.right - pill.left, h = pill.bottom - pill.top;
+    SIZE size{(LONG)std::ceil(w), (LONG)std::ceil(h)};
+    if (size.cx <= 0 || size.cy <= 0) {
+        return true;
+    }
+    if (!surface || size.cx != surfaceSize.cx || size.cy != surfaceSize.cy) {
+        surface = g_graphics.CreateDrawingSurface(
+            {(float)size.cx, (float)size.cy},
+            winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            winrt::Windows::Graphics::DirectX::DirectXAlphaMode::Premultiplied);
+        surfaceSize = size;
+        visual.Brush(g_compositor.CreateSurfaceBrush(surface));
+    }
+    visual.Offset(float3{pill.left, pill.top, 0});
+    visual.Size(float2{(float)size.cx, (float)size.cy});
+
+    com_ptr<ICompositionDrawingSurfaceInteropRaw> interop;
+    winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(surface))
+                             ->QueryInterface(IID_ICompositionDrawingSurfaceInterop,
+                                              interop.put_void()));
+    com_ptr<ID2D1DeviceContext> dc;
+    POINT offset{};
+    HRESULT hr = interop->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext), dc.put_void(), &offset);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET ||
+        hr == D2DERR_RECREATE_TARGET) {
+        return false;
+    }
+    winrt::check_hresult(hr);
+
+    // The surface can live in a shared atlas: clear only its own part.
+    dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    dc->PushAxisAlignedClip(D2D1::RectF((float)offset.x, (float)offset.y,
+                                        (float)(offset.x + size.cx), (float)(offset.y + size.cy)),
+                            D2D1_ANTIALIAS_MODE_ALIASED);
+    dc->Clear(D2D1::ColorF(0, 0));
+    dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    dc->SetTransform(D2D1::Matrix3x2F::Scale(s, s) *
+                     D2D1::Matrix3x2F::Translation((float)offset.x, (float)offset.y));
+
+    // Fill and DrawString paint with g_brush, which belongs to the cards'
+    // render target; lend them one of this context's for the duration.
+    com_ptr<ID2D1SolidColorBrush> brush;
+    dc->CreateSolidColorBrush(D2D1::ColorF(0), brush.put());
+    com_ptr<ID2D1SolidColorBrush> cardBrush = g_brush;
+    g_brush = brush;
+    paint(dc.get(), w / s, h / s);
+    g_brush = cardBrush;
+
+    dc->PopAxisAlignedClip();
+    hr = interop->EndDraw();
+    return !(hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET ||
+             hr == D2DERR_RECREATE_TARGET);
+}
+
+void RenderContent() {
+    if (!g_contentOn || !g_compositor || !g_contentVisual) {
+        return;
+    }
+    float s = GetDpiForWindow(g_hwnd) / 96.0f;
+    D2D1_RECT_F pill = PillRect(s);
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (!EnsureGraphics()) {
+            return;
+        }
+        try {
+            if (DrawSurface(g_surface, g_surfaceSize, g_contentVisual, pill, s, PaintContent)) {
+                return;
+            }
+        } catch (...) {
+            Wh_Log(L"Top bar draw failed: %08X", winrt::to_hresult());
+        }
+        ReleaseGraphics();
+    }
+}
+
+// The pill may have moved or resized with the bar.
+void PlaceContent() {
+    RenderContent();
+}
+
+void DestroyContent() {
+    if (!g_contentOn) {
+        return;
+    }
+    g_contentOn = false;
+    DestroyPanel();
+    StopStatus();
+    StopWatchingDesktops();
+    if (g_hwnd) {
+        KillTimer(g_hwnd, kTimerClock);
+    }
+    ReleaseGraphics();
+    if (g_contentVisual) {
+        try {
+            g_root.Children().Remove(g_contentVisual);
+        } catch (...) {
+        }
+        g_contentVisual = nullptr;
+    }
+    g_chips.clear();
+    g_hotChip = -1;
+}
+
+void CreateContent() {
+    if (g_contentOn || !g_hwnd || !g_compositor || !ContentWanted()) {
+        return;
+    }
+    try {
+        g_contentVisual = g_compositor.CreateSpriteVisual();
+        g_root.Children().InsertAtTop(g_contentVisual);
+    } catch (...) {
+        Wh_Log(L"Top bar content visual failed: %08X", winrt::to_hresult());
+        g_contentVisual = nullptr;
+        return;
+    }
+    g_contentOn = true;
+    ReadDesktops();
+    WatchDesktops();
+    ScheduleClock();
+    if (g_settings.topBarControlCenter) {
+        StartStatus();
+    }
+    RenderContent();
+}
+
+// Settings changed: made, removed, or redrawn with the new switches.
+void SyncContent() {
+    if (!ContentWanted()) {
+        DestroyContent();
+        return;
+    }
+    if (!g_contentOn) {
+        CreateContent();
+        return;
+    }
+    KillTimer(g_hwnd, kTimerClock);
+    ScheduleClock();
+    if (g_settings.topBarControlCenter) {
+        StartStatus();
+    } else {
+        DestroyPanel();
+        StopStatus();
+    }
+    RenderContent();
+    if (g_panelOpen) {
+        UpdatePanelBrushes();
+        LayoutPanel();
+    }
+}
+
+D2D1_POINT_2F PointInPill(LPARAM lParam) {
+    float s = GetDpiForWindow(g_hwnd) / 96.0f;
+    D2D1_RECT_F pill = PillRect(s);
+    return {(GET_X_LPARAM(lParam) - pill.left) / s, (GET_Y_LPARAM(lParam) - pill.top) / s};
+}
+
+bool StatusAt(LPARAM lParam) {
+    return g_statusRect.right > g_statusRect.left && Contains(g_statusRect, PointInPill(lParam));
+}
+
+int ChipAt(LPARAM lParam) {
+    D2D1_POINT_2F p = PointInPill(lParam);
+    for (int i = 0; i < (int)g_chips.size(); i++) {
+        if (Contains(g_chips[i], p)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// The bar window's share of the content's messages; true when handled.
+bool ContentMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_MOUSEMOVE: {
+            if (!g_trackingMouse) {
+                TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
+                g_trackingMouse = TrackMouseEvent(&tme);
+            }
+            int chip = ChipAt(lParam);
+            bool status = StatusAt(lParam);
+            if (chip != g_hotChip || status != g_hotStatus) {
+                g_hotChip = chip;
+                g_hotStatus = status;
+                RenderContent();
+            }
+            return true;
+        }
+
+        case WM_MOUSELEAVE:
+            g_trackingMouse = false;
+            if (g_hotChip != -1 || g_hotStatus) {
+                g_hotChip = -1;
+                g_hotStatus = false;
+                RenderContent();
+            }
+            return true;
+
+        case WM_LBUTTONUP: {
+            int chip = ChipAt(lParam);
+            if (chip >= 0) {
+                SwitchDesktop(chip);
+            } else if (StatusAt(lParam)) {
+                TogglePanel();
+            }
+            return true;
+        }
+
+        case WM_APP_STATUS:
+            if (wParam == kStatusVolume) {
+                ReadVolume();
+            } else if (wParam == kStatusDevice) {
+                OpenEndpoint();
+            } else if (wParam == kStatusControls) {
+                std::lock_guard<std::mutex> lock(g_workerMutex);
+                g_status.brightness = g_workerResult.brightness;
+                g_status.wifiRadio = g_workerResult.wifi;
+                g_status.bluetoothRadio = g_workerResult.bluetooth;
+            }
+            RenderContent();
+            if (g_panelOpen) {
+                LayoutPanel();  // brightness can appear, and the height with it
+            }
+            return true;
+
+        case WM_POWERBROADCAST:
+            if (g_statusOn) {
+                ReadBattery();
+                RenderContent();
+                RenderPanel();
+                // Windows sets "charging" a moment after the power source
+                // changes, so the first read often comes too early.
+                SetTimer(hwnd, kTimerBattery, 500, nullptr);
+                SetTimer(hwnd, kTimerBatteryLate, 2000, nullptr);
+            }
+            return false;
+
+        case WM_TIMER:
+            if (wParam == kTimerClock) {
+                KillTimer(hwnd, kTimerClock);
+                RenderContent();
+                ScheduleClock();
+                return true;
+            }
+            if (wParam == kTimerNetwork || wParam == kTimerBattery || wParam == kTimerBatteryLate) {
+                if (wParam != kTimerNetwork) {
+                    KillTimer(hwnd, wParam);
+                }
+                if (g_statusOn) {
+                    bool changed = wParam == kTimerNetwork && ReadNetwork();
+                    changed |= ReadBattery();
+                    if (changed) {
+                        RenderContent();
+                        RenderPanel();
+                    }
+                }
+                return true;
+            }
+            return false;
+
+        case WM_APP_DESKTOPS:
+            WatchDesktops();
+            if (ReadDesktops()) {
+                RenderContent();
+            }
+            return true;
+
+        case WM_TIMECHANGE:
+            KillTimer(hwnd, kTimerClock);
+            RenderContent();
+            ScheduleClock();
+            return true;
+    }
+    return false;
+}
+
+// -----------------------------------------------------------------------------
+// The control center panel: drops down under the bar's right end when the
+// status icons are clicked. A window of its own -- it has to take the
+// keyboard (Esc) and know when you click elsewhere, which the bar never does
+// -- but glass like the bar's and drawn the same composition-only way.
+
+constexpr float kPanelW = 320;
+constexpr float kPanelPad = 14;
+constexpr float kPanelGap = 6;      // between the bar and the panel
+constexpr float kSectionGap = 12;
+constexpr float kTileH = 56;
+constexpr float kVolumeH = 52;      // device name above the slider
+constexpr float kSliderH = 38;
+constexpr float kFooterH = 40;
+constexpr float kButton = 32;
+
+enum PanelHitId {
+    kHitNone,
+    kHitWifi,
+    kHitWifiMore,
+    kHitBluetooth,
+    kHitMute,
+    kHitVolume,
+    kHitBrightness,
+    kHitSettings,
+    kHitNotifications,
+    kHitQuick,
+};
+
+struct PanelHit {
+    D2D1_RECT_F r;
+    int id;
+};
+
+HWND g_panel;
+bool g_panelOpen;
+ULONGLONG g_panelClosedAt;
+wuc::Desktop::DesktopWindowTarget g_panelTarget{nullptr};
+wuc::ContainerVisual g_panelRoot{nullptr};
+wuc::ContainerVisual g_panelCard{nullptr};
+wuc::CompositionRoundedRectangleGeometry g_panelShape{nullptr};
+wuc::SpriteVisual g_panelBackdrop{nullptr};
+wuc::SpriteVisual g_panelTint{nullptr};
+wuc::ShapeVisual g_panelBorder{nullptr};
+wuc::CompositionRoundedRectangleGeometry g_panelBorderShape{nullptr};
+wuc::CompositionSpriteShape g_panelBorderStroke{nullptr};
+std::vector<PanelHit> g_panelHits;
+int g_panelHot = kHitNone;
+int g_panelDrag = kHitNone;
+bool g_panelTracking;
+// Slider tracks from the last paint, in DIPs.
+float g_volumeTrack[2], g_brightnessTrack[2];
+
+bool PanelHasConnectivity() {
+    return g_settings.ccWifi || g_settings.ccBluetooth;
+}
+bool PanelHasVolume() {
+    return g_settings.ccVolume && g_status.volumeAvailable;
+}
+bool PanelHasBrightness() {
+    return g_settings.ccBrightness && g_status.brightness >= 0;
+}
+bool PanelHasFooter() {
+    return (g_settings.ccBattery && g_status.battery) || g_settings.ccActions;
+}
+
+float PanelHeight() {
+    float h = 0;
+    int sections = 0;
+    auto add = [&](float section) {
+        h += (sections++ ? kSectionGap : 0) + section;
+    };
+    if (PanelHasConnectivity()) {
+        add(kTileH);
+    }
+    if (PanelHasVolume()) {
+        add(kVolumeH);
+    }
+    if (PanelHasBrightness()) {
+        add(kSliderH);
+    }
+    if (PanelHasFooter()) {
+        add(kFooterH);
+    }
+    if (!sections) {
+        add(24);  // "Nothing switched on"
+    }
+    return h + 2 * kPanelPad;
+}
+
+PCWSTR VolumeGlyph() {
+    if (!g_status.volumeAvailable || g_status.muted || g_status.volume <= 0.001f) {
+        return L"\uE74F";
+    }
+    return g_status.volume < 0.34f ? L"\uE993" : g_status.volume < 0.67f ? L"\uE994" : L"\uE995";
+}
+
+// The taskbar's own: long batteries in tenths, with and without the bolt.
+std::wstring BatteryGlyph() {
+    static const wchar_t kLevels[] = {0xE850, 0xE851, 0xE852, 0xE853, 0xE854, 0xE855,
+                                      0xE856, 0xE857, 0xE858, 0xE859, 0xE83F};
+    static const wchar_t kCharging[] = {0xE85A, 0xE85B, 0xE85C, 0xE85D, 0xE85E, 0xE85F,
+                                        0xE860, 0xE861, 0xE862, 0xE83E, 0xEA93};
+    int step = std::clamp((g_status.batteryPercent + 5) / 10, 0, 10);
+    return std::wstring(1, (g_status.charging ? kCharging : kLevels)[step]);
+}
+
+std::wstring Percent(float fraction) {
+    return std::to_wstring((int)std::lround(fraction * 100));
+}
+
+void DrawSlider(ID2D1RenderTarget* rt, float left, float right, float cy, float value,
+                bool active) {
+    Fill(rt, D2D1::RectF(left, cy - 2, right, cy + 2), 2, g_pal.track);
+    float x = left + (right - left) * std::clamp(value, 0.0f, 1.0f);
+    Fill(rt, D2D1::RectF(left, cy - 2, x, cy + 2), 2, g_pal.accent);
+    float r = active ? 9.0f : 8.0f;
+    Fill(rt, D2D1::RectF(x - r, cy - r, x + r, cy + r), r, g_pal.accent);
+    Fill(rt, D2D1::RectF(x - 4, cy - 4, x + 4, cy + 4), 4, Rgba(1, 1, 1, 1));
+}
+
+void DrawButton(ID2D1RenderTarget* rt, D2D1_RECT_F r, PCWSTR glyph, int id, bool on) {
+    g_panelHits.push_back({r, id});
+    if (on) {
+        Fill(rt, r, 8, g_pal.accent);
+    } else if (g_panelHot == id) {
+        Fill(rt, r, 8, g_pal.hover);
+    }
+    DrawString(rt, g_fonts.panelIcon.get(), glyph, r, on ? g_pal.onAccent : g_pal.text);
+}
+
+void DrawTile(ID2D1RenderTarget* rt, D2D1_RECT_F r, PCWSTR glyph, PCWSTR title,
+              const std::wstring& subtitle, int id, int state, bool more) {
+    bool on = state == 1;
+    g_panelHits.push_back({r, id});
+    Fill(rt, r, 10, on ? g_pal.accent : g_pal.hover);
+    if (g_panelHot == id || (more && g_panelHot == kHitWifiMore)) {
+        Fill(rt, r, 10, on ? Rgba(1, 1, 1, 0.12f) : g_pal.hover);
+    }
+    D2D1_COLOR_F text = on ? g_pal.onAccent : g_pal.text;
+    D2D1_COLOR_F text2 = on ? WithAlpha(g_pal.onAccent, 0.8f) : g_pal.text2;
+    DrawString(rt, g_fonts.iconBig.get(), glyph, D2D1::RectF(r.left + 6, r.top, r.left + 42, r.bottom),
+               text);
+    float textRight = r.right - (more ? 30 : 10);
+    DrawString(rt, g_fonts.panelTitle.get(), title,
+               D2D1::RectF(r.left + 44, r.top + 9, textRight, r.top + 29), text);
+    DrawString(rt, g_fonts.bodyEllipsis.get(), subtitle,
+               D2D1::RectF(r.left + 44, r.top + 28, textRight, r.bottom - 8), text2);
+    if (more) {
+        D2D1_RECT_F chevron = D2D1::RectF(r.right - 30, r.top, r.right, r.bottom);
+        g_panelHits.push_back({chevron, kHitWifiMore});
+        DrawString(rt, g_fonts.icon.get(), L"\uE76C", chevron, text2);
+    }
+}
+
+std::wstring BatteryText() {
+    std::wstring text = std::to_wstring(g_status.batteryPercent) + L"%";
+    if (g_status.charging) {
+        text += L"  ·  Charging";
+    } else if (g_status.pluggedIn) {
+        text += L"  ·  Plugged in";
+    } else if (g_status.batterySeconds > 0) {
+        int minutes = g_status.batterySeconds / 60;
+        text += L"  ·  ";
+        if (minutes >= 60) {
+            text += std::to_wstring(minutes / 60) + L" h ";
+        }
+        text += std::to_wstring(minutes % 60) + L" min left";
+    }
+    return text;
+}
+
+void PaintPanel(ID2D1RenderTarget* rt, float w, float) {
+    g_panelHits.clear();
+    float x0 = kPanelPad, x1 = w - kPanelPad;
+    float y = kPanelPad;
+    int sections = 0;
+    auto next = [&](float section) {
+        if (sections++) {
+            y += kSectionGap;
+        }
+        float top = y;
+        y += section;
+        return top;
+    };
+
+    if (PanelHasConnectivity()) {
+        float top = next(kTileH);
+        bool both = g_settings.ccWifi && g_settings.ccBluetooth;
+        float tileW = both ? (x1 - x0 - 8) / 2 : x1 - x0;
+        float x = x0;
+        if (g_settings.ccWifi) {
+            std::wstring sub = g_status.wifiRadio == 0          ? L"Off"
+                               : g_status.net == NetKind::Wifi ? g_status.ssid
+                               : g_status.net == NetKind::Ethernet ? L"Using Ethernet"
+                                                                   : L"Not connected";
+            DrawTile(rt, D2D1::RectF(x, top, x + tileW, top + kTileH), L"\uE701", L"Wi-Fi", sub,
+                     kHitWifi, g_status.wifiRadio, true);
+            x += tileW + 8;
+        }
+        if (g_settings.ccBluetooth) {
+            std::wstring sub = g_status.bluetoothRadio == 1   ? L"On"
+                               : g_status.bluetoothRadio == 0 ? L"Off"
+                                                              : L"Unavailable";
+            DrawTile(rt, D2D1::RectF(x, top, x + tileW, top + kTileH), L"\uE702", L"Bluetooth",
+                     sub, kHitBluetooth, g_status.bluetoothRadio, false);
+        }
+    }
+
+    if (PanelHasVolume()) {
+        float top = next(kVolumeH);
+        DrawString(rt, g_fonts.small.get(), g_status.device,
+                   D2D1::RectF(x0 + 42, top, x1, top + 14), g_pal.text3);
+        float rowTop = top + 14;
+        float cy = rowTop + kSliderH / 2;
+        DrawButton(rt, D2D1::RectF(x0, cy - kButton / 2, x0 + kButton, cy + kButton / 2),
+                   VolumeGlyph(), kHitMute, false);
+        g_volumeTrack[0] = x0 + 46;
+        g_volumeTrack[1] = x1 - 38;
+        g_panelHits.push_back({D2D1::RectF(g_volumeTrack[0] - 10, rowTop, g_volumeTrack[1] + 10,
+                                           rowTop + kSliderH),
+                               kHitVolume});
+        float level = g_status.muted ? 0 : g_status.volume;
+        DrawSlider(rt, g_volumeTrack[0], g_volumeTrack[1], cy, level, g_panelDrag == kHitVolume);
+        DrawString(rt, g_fonts.smallRight.get(), Percent(level),
+                   D2D1::RectF(x1 - 32, rowTop, x1, rowTop + kSliderH), g_pal.text2);
+    }
+
+    if (PanelHasBrightness()) {
+        float top = next(kSliderH);
+        float cy = top + kSliderH / 2;
+        DrawString(rt, g_fonts.panelIcon.get(), L"\uE706",
+                   D2D1::RectF(x0, cy - kButton / 2, x0 + kButton, cy + kButton / 2), g_pal.text);
+        g_brightnessTrack[0] = x0 + 46;
+        g_brightnessTrack[1] = x1 - 38;
+        g_panelHits.push_back({D2D1::RectF(g_brightnessTrack[0] - 10, top,
+                                           g_brightnessTrack[1] + 10, top + kSliderH),
+                               kHitBrightness});
+        float level = g_status.brightness / 100.0f;
+        DrawSlider(rt, g_brightnessTrack[0], g_brightnessTrack[1], cy, level,
+                   g_panelDrag == kHitBrightness);
+        DrawString(rt, g_fonts.smallRight.get(), Percent(level),
+                   D2D1::RectF(x1 - 32, top, x1, top + kSliderH), g_pal.text2);
+    }
+
+    if (PanelHasFooter()) {
+        float top = next(kFooterH);
+        if (sections > 1) {
+            Fill(rt, D2D1::RectF(x0, top - kSectionGap / 2 - 0.5f, x1, top - kSectionGap / 2 + 0.5f),
+                 0, g_pal.border);
+        }
+        float cy = top + kFooterH / 2;
+        if (g_settings.ccBattery && g_status.battery) {
+            DrawString(rt, g_fonts.panelBattery.get(), BatteryGlyph(),
+                       D2D1::RectF(x0, top, x0 + 30, top + kFooterH), g_pal.text);
+            DrawString(rt, g_fonts.body.get(), BatteryText(),
+                       D2D1::RectF(x0 + 36, top, x1 - 3 * (kButton + 4), top + kFooterH),
+                       g_pal.text);
+        }
+        if (g_settings.ccActions) {
+            float x = x1;
+            auto button = [&](PCWSTR glyph, int id, bool on) {
+                x -= kButton;
+                DrawButton(rt, D2D1::RectF(x, cy - kButton / 2, x + kButton, cy + kButton / 2),
+                           glyph, id, on);
+                x -= 4;
+            };
+            button(L"\uE80A", kHitQuick, false);
+            button(L"\uEA8F", kHitNotifications, false);
+            button(L"\uE713", kHitSettings, false);
+        }
+    }
+
+    if (!sections) {
+        float top = next(24);
+        DrawString(rt, g_fonts.hint.get(), L"Nothing switched on in the settings",
+                   D2D1::RectF(x0, top, x1, top + 24), g_pal.text3);
+    }
+}
+
+void UpdatePanelBrushes() {
+    if (!g_panelCard) {
+        return;
+    }
+    try {
+        g_panelBorderStroke.StrokeBrush(g_compositor.CreateColorBrush(ToColor(g_pal.border)));
+        if (TransparencyOn()) {
+            D2D1_COLOR_F tint = g_pal.bg;
+            if (g_settings.topBarOpacity > 0) {
+                tint.a = g_settings.topBarOpacity;
+            }
+            // Always blurred, whatever the bar does: the panel sits over
+            // windows, and text under it would fight with its own.
+            g_panelBackdrop.Brush(g_compositor.CreateHostBackdropBrush());
+            g_panelTint.Brush(g_compositor.CreateColorBrush(ToColor(tint)));
+        } else {
+            g_panelBackdrop.Brush(g_compositor.CreateColorBrush(
+                Argb(IsLightPalette() ? 0xFFF3F3F3 : 0xFF202020)));
+            g_panelTint.Brush(nullptr);
+        }
+    } catch (...) {
+        Wh_Log(L"Panel brushes failed: %08X", winrt::to_hresult());
+    }
+}
+
+void RenderPanel() {
+    if (!g_panel || !g_panelOpen || !g_panelContent) {
+        return;
+    }
+    RECT client;
+    GetClientRect(g_panel, &client);
+    float s = GetDpiForWindow(g_panel) / 96.0f;
+    D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)client.right, (float)client.bottom);
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (!EnsureGraphics()) {
+            return;
+        }
+        try {
+            if (DrawSurface(g_panelSurface, g_panelSurfaceSize, g_panelContent, rect, s,
+                            PaintPanel)) {
+                return;
+            }
+        } catch (...) {
+            Wh_Log(L"Panel draw failed: %08X", winrt::to_hresult());
+        }
+        ReleaseGraphics();
+    }
+}
+
+// Sized to what's switched on, under the bar's right end.
+void LayoutPanel() {
+    if (!g_panel) {
+        return;
+    }
+    float s = GetDpiForWindow(g_hwnd) / 96.0f;
+    int w = (int)std::lround(kPanelW * s);
+    int h = (int)std::lround(PanelHeight() * s);
+    D2D1_RECT_F pill = PillRect(s);
+    int right = g_rect.left + (int)pill.right;
+    int top = g_rect.top + (int)pill.bottom + (int)std::lround(kPanelGap * s);
+    SetWindowPos(g_panel, HWND_TOPMOST, right - w, top, w, h, SWP_NOACTIVATE);
+
+    float r = std::round(g_settings.cornerRadius * s);
+    float b = std::max(1.0f, std::round(kBorder * s));
+    try {
+        g_panelCard.Size(float2{(float)w, (float)h});
+        g_panelShape.Size(float2{(float)w, (float)h});
+        g_panelShape.CornerRadius(float2{r, r});
+        g_panelBorder.Size(float2{(float)w, (float)h});
+        g_panelBorderShape.Offset(float2{b / 2, b / 2});
+        g_panelBorderShape.Size(float2{w - b, h - b});
+        g_panelBorderShape.CornerRadius(float2{r - b / 2, r - b / 2});
+        g_panelBorderStroke.StrokeThickness(b);
+    } catch (...) {
+        Wh_Log(L"Panel layout failed: %08X", winrt::to_hresult());
+    }
+    RenderPanel();
+}
+
+void ReleasePanelVisuals() {
+    g_panelContent = nullptr;
+    g_panelSurface = nullptr;
+    g_panelSurfaceSize = {};
+    g_panelBorderStroke = nullptr;
+    g_panelBorderShape = nullptr;
+    g_panelBorder = nullptr;
+    g_panelTint = nullptr;
+    g_panelBackdrop = nullptr;
+    g_panelShape = nullptr;
+    g_panelCard = nullptr;
+    g_panelRoot = nullptr;
+    g_panelTarget = nullptr;
+}
+
+void DestroyPanel() {
+    if (!g_panel) {
+        return;
+    }
+    g_panelOpen = false;
+    ReleasePanelVisuals();
+    DestroyWindow(g_panel);
+    g_panel = nullptr;
+    g_panelHits.clear();
+    g_panelHot = g_panelDrag = kHitNone;
+}
+
+bool EnsurePanel() {
+    if (g_panel) {
+        return true;
+    }
+    g_panel = CreateBandWindow(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP,
+                               kPanelClass, g_hwnd);
+    if (!g_panel) {
+        return false;
+    }
+    BOOL on = TRUE;
+    DwmSetWindowAttribute(g_panel, DWMWA_USE_HOSTBACKDROPBRUSH, &on, sizeof(on));
+    DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(g_panel, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    try {
+        com_ptr<ICompositorDesktopInterop> interop;
+        winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(g_compositor))
+                                 ->QueryInterface(IID_ICompositorDesktopInterop,
+                                                  interop.put_void()));
+        winrt::check_hresult(
+            interop->CreateDesktopWindowTarget(g_panel, TRUE, winrt::put_abi(g_panelTarget)));
+
+        g_panelRoot = g_compositor.CreateContainerVisual();
+        g_panelRoot.RelativeSizeAdjustment(float2{1, 1});
+        g_panelShape = g_compositor.CreateRoundedRectangleGeometry();
+        g_panelCard = g_compositor.CreateContainerVisual();
+        g_panelCard.Clip(g_compositor.CreateGeometricClip(g_panelShape));
+        g_panelBackdrop = g_compositor.CreateSpriteVisual();
+        g_panelBackdrop.RelativeSizeAdjustment(float2{1, 1});
+        g_panelTint = g_compositor.CreateSpriteVisual();
+        g_panelTint.RelativeSizeAdjustment(float2{1, 1});
+        g_panelContent = g_compositor.CreateSpriteVisual();
+        g_panelCard.Children().InsertAtTop(g_panelBackdrop);
+        g_panelCard.Children().InsertAtTop(g_panelTint);
+        g_panelCard.Children().InsertAtTop(g_panelContent);
+        g_panelBorderShape = g_compositor.CreateRoundedRectangleGeometry();
+        g_panelBorderStroke = g_compositor.CreateSpriteShape(g_panelBorderShape);
+        g_panelBorder = g_compositor.CreateShapeVisual();
+        g_panelBorder.Shapes().Append(g_panelBorderStroke);
+        g_panelRoot.Children().InsertAtTop(g_panelCard);
+        g_panelRoot.Children().InsertAtTop(g_panelBorder);
+        g_panelTarget.Root(g_panelRoot);
+    } catch (...) {
+        Wh_Log(L"Panel composition failed: %08X", winrt::to_hresult());
+        DestroyPanel();
+        return false;
+    }
+    UpdatePanelBrushes();
+    return true;
+}
+
+constexpr int kPanelFadeMs = 260;
+constexpr float kPanelSlide = 10;  // DIPs it drops in from
+
+// Fades and slides the panel in (show) or out. Its window must already be on
+// screen at the start state, so the first frame never flashes it fully drawn.
+void FadePanel(bool show) {
+    try {
+        float slide = std::round(kPanelSlide * GetDpiForWindow(g_panel) / 96.0f);
+        if (!g_settings.animations) {
+            g_panelRoot.Opacity(show ? 1.0f : 0.0f);
+            g_panelRoot.Offset(float3{0, 0, 0});
+            return;
+        }
+        // CSS's "ease": a soft start and a long, gradual settle.
+        auto ease = g_compositor.CreateCubicBezierEasingFunction(float2{0.25f, 0.1f},
+                                                                 float2{0.25f, 1.0f});
+        auto duration = std::chrono::milliseconds(show ? kPanelFadeMs : kPanelFadeMs - 60);
+        auto fade = g_compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0, show ? 0.0f : 1.0f);
+        fade.InsertKeyFrame(1, show ? 1.0f : 0.0f, ease);
+        fade.Duration(duration);
+        auto move = g_compositor.CreateVector3KeyFrameAnimation();
+        move.InsertKeyFrame(0, float3{0, show ? -slide : 0, 0});
+        move.InsertKeyFrame(1, float3{0, show ? 0 : -slide, 0}, ease);
+        move.Duration(duration);
+        g_panelRoot.StartAnimation(L"Opacity", fade);
+        g_panelRoot.StartAnimation(L"Offset", move);
+    } catch (...) {
+    }
+}
+
+void OpenPanel() {
+    if (!g_statusOn || g_panelOpen || !EnsurePanel()) {
+        return;
+    }
+    KillTimer(g_panel, kTimerPanelHide);
+    ReadVolume();
+    ReadNetwork();
+    ReadBattery();
+    RunOnWorker(RefreshControls);
+    g_panelOpen = true;
+    g_panelHot = g_panelDrag = kHitNone;
+    LayoutPanel();
+    try {
+        g_panelRoot.Opacity(0);
+    } catch (...) {
+    }
+    SetWindowPos(g_panel, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(g_panel);
+    FadePanel(true);
+    RenderContent();  // the icons stay highlighted while it's open
+}
+
+void ClosePanel() {
+    if (!g_panelOpen) {
+        return;
+    }
+    g_panelOpen = false;
+    g_panelClosedAt = GetTickCount64();
+    g_panelDrag = kHitNone;
+    if (GetCapture() == g_panel) {
+        ReleaseCapture();
+    }
+    if (g_settings.animations) {
+        FadePanel(false);
+        SetTimer(g_panel, kTimerPanelHide, kPanelFadeMs - 50, nullptr);
+    } else {
+        ShowWindow(g_panel, SW_HIDE);
+    }
+    RenderContent();
+}
+
+void TogglePanel() {
+    if (g_panelOpen) {
+        ClosePanel();
+    } else if (GetTickCount64() - g_panelClosedAt > 300) {
+        // Not straight after a close by clicking away -- that click was
+        // this one, on its way to reopening it.
+        OpenPanel();
+    }
+}
+
+int PanelHitAt(LPARAM lParam) {
+    float s = GetDpiForWindow(g_panel) / 96.0f;
+    D2D1_POINT_2F p{GET_X_LPARAM(lParam) / s, GET_Y_LPARAM(lParam) / s};
+    // Later entries sit on top (the Wi-Fi chevron inside its tile).
+    for (int i = (int)g_panelHits.size() - 1; i >= 0; i--) {
+        if (Contains(g_panelHits[i].r, p)) {
+            return g_panelHits[i].id;
+        }
+    }
+    return kHitNone;
+}
+
+void DragSlider(LPARAM lParam) {
+    float s = GetDpiForWindow(g_panel) / 96.0f;
+    float x = GET_X_LPARAM(lParam) / s;
+    const float* track = g_panelDrag == kHitVolume ? g_volumeTrack : g_brightnessTrack;
+    float value = std::clamp((x - track[0]) / std::max(1.0f, track[1] - track[0]), 0.0f, 1.0f);
+    if (g_panelDrag == kHitVolume) {
+        SetVolume(value);
+        RenderContent();
+    } else {
+        int level = (int)std::lround(value * 100);
+        if (level != g_status.brightness) {
+            g_status.brightness = level;
+            QueueBrightness(level);
+        }
+    }
+    RenderPanel();
+}
+
+void OpenUri(PCWSTR uri) {
+    ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void ActivateHit(int id) {
+    switch (id) {
+        case kHitWifi:
+        case kHitBluetooth: {
+            bool wifi = id == kHitWifi;
+            int& state = wifi ? g_status.wifiRadio : g_status.bluetoothRadio;
+            if (state < 0) {
+                return;
+            }
+            bool on = state == 0;
+            state = on ? 1 : 0;  // shown at once; the worker confirms
+            RunOnWorker([wifi, on] {
+                SetRadio(wifi ? wdr::RadioKind::WiFi : wdr::RadioKind::Bluetooth, on);
+                RefreshControls();
+            });
+            break;
+        }
+        case kHitWifiMore:
+            ClosePanel();
+            OpenUri(L"ms-availablenetworks:");
+            return;
+        case kHitMute:
+            ToggleMute();
+            RenderContent();
+            break;
+        case kHitSettings:
+            ClosePanel();
+            OpenUri(L"ms-settings:");
+            return;
+        case kHitNotifications:
+            ClosePanel();
+            OpenUri(L"ms-actioncenter:");
+            return;
+        case kHitQuick:
+            ClosePanel();
+            OpenUri(L"ms-actioncenter:controlcenter/&showFooter=true");
+            return;
+    }
+    RenderPanel();
+}
+
+LRESULT CALLBACK PanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_ACTIVATE:
+            if (LOWORD(wParam) == WA_INACTIVE) {
+                ClosePanel();
+            }
+            break;
+
+        case WM_KEYDOWN:
+            if (wParam == VK_ESCAPE) {
+                ClosePanel();
+                return 0;
+            }
+            break;
+
+        case WM_MOUSEMOVE: {
+            if (!g_panelTracking) {
+                TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
+                g_panelTracking = TrackMouseEvent(&tme);
+            }
+            if (g_panelDrag != kHitNone) {
+                DragSlider(lParam);
+                return 0;
+            }
+            int hot = PanelHitAt(lParam);
+            if (hot != g_panelHot) {
+                g_panelHot = hot;
+                RenderPanel();
+            }
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+            g_panelTracking = false;
+            if (g_panelHot != kHitNone && g_panelDrag == kHitNone) {
+                g_panelHot = kHitNone;
+                RenderPanel();
+            }
+            return 0;
+
+        case WM_LBUTTONDOWN: {
+            int id = PanelHitAt(lParam);
+            if (id == kHitVolume || id == kHitBrightness) {
+                g_panelDrag = id;
+                SetCapture(hwnd);
+                DragSlider(lParam);
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP:
+            if (g_panelDrag != kHitNone) {
+                g_panelDrag = kHitNone;
+                ReleaseCapture();
+                RenderPanel();
+            } else {
+                ActivateHit(PanelHitAt(lParam));
+            }
+            return 0;
+
+        case WM_CAPTURECHANGED:
+            if (g_panelDrag != kHitNone) {
+                g_panelDrag = kHitNone;
+                RenderPanel();
+            }
+            return 0;
+
+        case WM_MOUSEWHEEL: {
+            POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            ScreenToClient(hwnd, &pt);
+            int id = PanelHitAt(MAKELPARAM(pt.x, pt.y));
+            float step = GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 0.02f : -0.02f;
+            if (id == kHitVolume || id == kHitMute) {
+                SetVolume(g_status.volume + step);
+                RenderContent();
+                RenderPanel();
+            } else if (id == kHitBrightness && g_status.brightness >= 0) {
+                g_status.brightness = std::clamp(g_status.brightness + (step > 0 ? 2 : -2), 0, 100);
+                QueueBrightness(g_status.brightness);
+                RenderPanel();
+            }
+            return 0;
+        }
+
+        case WM_TIMER:
+            if (wParam == kTimerPanelHide) {
+                KillTimer(hwnd, kTimerPanelHide);
+                if (!g_panelOpen) {
+                    ShowWindow(hwnd, SW_HIDE);
+                }
+            }
+            return 0;
+
+        case WM_DPICHANGED:
+            LayoutPanel();
+            return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+// The desktop-switch slide (Desktops mod, or Ctrl+Win+arrows) is drawn by a
+// full-screen VirtualDesktopHotkeySwitcher window in z-order band 2,
+// ZBID_UIACCESS -- above every ordinary window, topmost or not, which band 1
+// holds. The taskbar is spared by the switcher itself; nothing else is. So the
+// bar is made in band 2 too (explorer may; ordinary apps may not), and raised
+// above the switcher whenever one appears, since a new window goes on top of
+// its band.
+constexpr DWORD kBand = 2;
+constexpr PCWSTR kSwitcherClass = L"VirtualDesktopHotkeySwitcher";
+
+HWINEVENTHOOK g_switcherHook;
+
+using CreateWindowInBand_t = HWND(WINAPI*)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int,
+                                           int, int, HWND, HMENU, HINSTANCE, LPVOID, DWORD);
+
+// Falls back to an ordinary window, which the slide covers but which works.
+HWND CreateBandWindow(DWORD exStyle, PCWSTR className, HWND owner) {
+    static auto createInBand = reinterpret_cast<CreateWindowInBand_t>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "CreateWindowInBand"));
+    if (createInBand) {
+        HWND hwnd = createInBand(exStyle, className, L"", WS_POPUP, 0, 0, 0, 0, owner,
+                                 nullptr, g_hinst, nullptr, kBand);
+        if (hwnd) {
+            return hwnd;
+        }
+        Wh_Log(L"CreateWindowInBand failed: %u", GetLastError());
+    }
+    return CreateWindowExW(exStyle, className, L"", WS_POPUP, 0, 0, 0, 0, owner, nullptr,
+                           g_hinst, nullptr);
+}
+
+void RaiseAboveSwitcher();
+
+void CALLBACK SwitcherEventProc(HWINEVENTHOOK, DWORD, HWND hwnd, LONG idObject, LONG,
+                                DWORD, DWORD) {
+    if (idObject != OBJID_WINDOW || !hwnd) {
+        return;
+    }
+    wchar_t name[64] = L"";
+    GetClassNameW(hwnd, name, ARRAYSIZE(name));
+    if (wcscmp(name, kSwitcherClass) == 0) {
+        ClosePanel();
+        RaiseAboveSwitcher();
+    }
+}
+
+// The switcher is explorer's own, so only explorer's events are asked for.
+void WatchSwitcher() {
+    if (!g_switcherHook) {
+        g_switcherHook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr,
+                                         SwitcherEventProc, GetCurrentProcessId(), 0,
+                                         WINEVENT_OUTOFCONTEXT);
+    }
+}
+
+void StopWatchingSwitcher() {
+    if (g_switcherHook) {
+        UnhookWinEvent(g_switcherHook);
+        g_switcherHook = nullptr;
+    }
+}
+
 // Claims the strip along the primary monitor's top edge. With force false it
 // only re-applies when the shell would now put the bar somewhere else, so
 // answering ABN_POSCHANGED can't feed back into another one.
@@ -3462,6 +5508,7 @@ void Place(bool force) {
                  g_rect.right - g_rect.left, g_rect.bottom - g_rect.top,
                  SWP_NOACTIVATE | (g_fullscreen ? 0 : SWP_SHOWWINDOW));
     Layout();
+    PlaceContent();
 }
 
 // Before the taskbar exists -- explorer starting up -- ABM_NEW has no one to
@@ -3483,11 +5530,13 @@ void Register() {
 void SetFullscreen(bool fullscreen) {
     g_fullscreen = fullscreen;
     if (fullscreen) {
+        ClosePanel();
         ShowWindow(g_hwnd, SW_HIDE);
     } else if (g_registered) {
         SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
+    PlaceContent();
 }
 
 void Destroy() {
@@ -3495,6 +5544,8 @@ void Destroy() {
         return;
     }
     KillTimer(g_hwnd, kTimerTopBar);
+    StopWatchingSwitcher();
+    DestroyContent();
     // Without this the shell keeps the strip reserved, empty, until sign-out.
     if (g_registered) {
         APPBARDATA abd{sizeof(abd)};
@@ -3514,9 +5565,9 @@ void Create() {
         return;
     }
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
-    g_hwnd = CreateWindowExW(
+    g_hwnd = CreateBandWindow(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
-        kTopBarClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, g_hinst, nullptr);
+        kTopBarClass, nullptr);
     if (!g_hwnd) {
         Wh_Log(L"Top bar CreateWindowEx failed: %u", GetLastError());
         return;
@@ -3535,7 +5586,9 @@ void Create() {
         return;
     }
     UpdateBrushes();
+    CreateContent();
     Register();
+    WatchSwitcher();
 
     if (g_settings.animations) {
         try {
@@ -3549,6 +5602,13 @@ void Create() {
     }
 }
 
+void RaiseAboveSwitcher() {
+    if (!g_hwnd || g_fullscreen || !g_registered) {
+        return;
+    }
+    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 // Brings the bar in line with the settings: made, removed, or re-fitted (the
 // height may have changed, or the monitors).
 void Sync() {
@@ -3560,6 +5620,7 @@ void Sync() {
         Create();
         return;
     }
+    SyncContent();
     if (g_registered) {
         Place(true);
     }
@@ -3574,6 +5635,10 @@ void Shutdown() {
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ContentMessage(hwnd, msg, wParam, lParam)) {
+        return 0;
+    }
+
     // A new taskbar knows nothing of the old one's app bars.
     if (g_taskbarCreated && msg == g_taskbarCreated) {
         g_registered = false;
@@ -3622,6 +5687,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Place already sized the window for the monitor's DPI; the
             // suggested rectangle would undo that.
             Layout();
+            PlaceContent();
             return 0;
 
         case WM_MOUSEACTIVATE:
@@ -3799,6 +5865,7 @@ bool IsShellClass(const std::wstring& name) {
         L"NotifyIconOverflowWindow",
         L"TopLevelWindowForOverflowXamlIsland",
         L"#32768",  // menus
+        kPanelClass,  // the top bar's control center: like the shell's flyouts
     };
     for (PCWSTR c : shell) {
         if (name == c) {
@@ -4077,6 +6144,10 @@ void UiThreadProc(HANDLE ready) {
     wc.lpszClassName = kTopBarClass;
     RegisterClassExW(&wc);
 
+    wc.lpfnWndProc = topbar::PanelWndProc;
+    wc.lpszClassName = kPanelClass;
+    RegisterClassExW(&wc);
+
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory),
                       nullptr, g_d2d.put_void());
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -4131,6 +6202,7 @@ void UiThreadProc(HANDLE ready) {
     g_dw = nullptr;
     g_d2d = nullptr;
     g_host = nullptr;
+    UnregisterClassW(kPanelClass, g_hinst);
     UnregisterClassW(kTopBarClass, g_hinst);
     UnregisterClassW(kInputClass, g_hinst);
     UnregisterClassW(kWidgetClass, g_hinst);

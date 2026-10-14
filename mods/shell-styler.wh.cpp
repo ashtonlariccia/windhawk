@@ -61,6 +61,13 @@ taskbar.
     Icons stay full size when the taskbar fills up. The app pill grows toward
     the screen edges instead, and only once it spans the whole bar do extra
     apps go into the overflow menu.
+- taskbarShowTray: true
+  $name: "Taskbar: show control center"
+  $description: >-
+    The tray pill at the right of the taskbar: tray icons, network, volume,
+    battery and the clock. Off hides it; Win+A and Win+N still open quick
+    settings and notifications. Needs the taskbar style on. Restart explorer
+    to apply.
 - taskbarCornerRadius: 8
   $name: "Taskbar: pill corner radius"
   $description: >-
@@ -9066,6 +9073,7 @@ struct {
     bool dockAnimation;
     bool fullSizeIcons;
     int taskbarCornerRadius;
+    bool taskbarShowTray;
     bool startMenuStyle;
     int startMenuHeight;
     bool notificationCenterStyle;
@@ -9077,6 +9085,7 @@ void LoadSettings() {
     g_settings.fullSizeIcons = Wh_GetIntSetting(L"taskbarFullSizeIcons") != 0;
     g_settings.taskbarCornerRadius =
         std::clamp(Wh_GetIntSetting(L"taskbarCornerRadius"), 0, 100);
+    g_settings.taskbarShowTray = Wh_GetIntSetting(L"taskbarShowTray") != 0;
     g_settings.startMenuStyle = Wh_GetIntSetting(L"startMenuStyle") != 0;
     g_settings.startMenuHeight =
         std::clamp(Wh_GetIntSetting(L"startMenuHeight"), 100, 100000);
@@ -9156,6 +9165,12 @@ void ProcessAllStylesFromSettings() {
             styles.reserve(themeTargetStyle.styles.size());
             for (const auto& s : themeTargetStyle.styles) {
                 styles.push_back(ApplyStyleConstants(s, styleConstants));
+            }
+            // "Taskbar: show control center" off: the tray pill goes, as it
+            // moves to the Widgets top bar.
+            if (g_target == Target::Taskbar && !g_settings.taskbarShowTray &&
+                wcscmp(themeTargetStyle.target, L"SystemTray.SystemTrayFrame") == 0) {
+                styles.push_back(L"Visibility=Collapsed");
             }
 
             AddElementCustomizationRules(themeTargetStyle.target, styles);
