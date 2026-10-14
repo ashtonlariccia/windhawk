@@ -105,7 +105,7 @@ there after Win+D. They never activate when clicked.
   (This replaced WebView2 web boxes, which never loaded reliably; they are in
   `build/widgets-webboxes-backup-20260927.wh.cpp`.)
 * **Top bar** -- a glass pill across the top of the primary monitor: the
-  cards' colour, opacity and border over a blur, with round ends and the
+  cards' colour, opacity and border over a blur, with 8 DIP window corners and the
   taskbar pills' 8 / 2 DIP margins. It's an app bar, so the work area starts below it, and it hides
   for fullscreen apps. Unlike the cards it is composed with
   Windows.UI.Composition -- DWM's host backdrop brush is the only way to blur

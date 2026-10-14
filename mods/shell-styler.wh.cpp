@@ -61,6 +61,11 @@ taskbar.
     Icons stay full size when the taskbar fills up. The app pill grows toward
     the screen edges instead, and only once it spans the whole bar do extra
     apps go into the overflow menu.
+- taskbarCornerRadius: 8
+  $name: "Taskbar: pill corner radius"
+  $description: >-
+    Rounding of the app, tray and pager pills. 8 matches an ordinary window;
+    a large number gives fully round ends. Restart explorer to apply.
 - dockAnimation: true
   $name: "Taskbar: dock animation"
   $description: Icons grow under the cursor, like the macOS dock.
@@ -204,7 +209,7 @@ const Theme g_themeTaskbar = {{
         L"Margin=$AppPillMargin",
         L"BorderThickness=$BorderThickness",
         L"BorderBrush:=$BorderBrush",
-        L"CornerRadius=$CornerRadius",
+        L"CornerRadius=$PillCornerRadius",
         L"Background:=$PillBackground",
         L"Padding=$AppPillPadding"}},
     ThemeTargetStyles{L"Taskbar.TaskbarBackground#BackgroundControl > Windows.UI.Xaml.Controls.Grid > Windows.UI.Xaml.Shapes.Rectangle#BackgroundFill", {
@@ -233,7 +238,7 @@ const Theme g_themeTaskbar = {{
         L"Background:=$PillBackground",
         L"BorderBrush:=$BorderBrush",
         L"BorderThickness=$BorderThickness",
-        L"CornerRadius=$CornerRadius"}},
+        L"CornerRadius=$PillCornerRadius"}},
     // Fork: WindowGlass's rule on the root grid is dropped entirely --
     // both the four-column split (alignment does the placing now) and the
     // ActualWidth=>containerGridWidth capture, which nothing consumes any
@@ -315,7 +320,7 @@ const Theme g_themeTaskbar = {{
         L"Background:=$PillBackground",
         L"BorderBrush:=$BorderBrush",
         L"BorderThickness=$BorderThickness",
-        L"CornerRadius=$CornerRadius"}},
+        L"CornerRadius=$PillCornerRadius"}},
     ThemeTargetStyles{L"Button#WhVdDesktopButton", {
         L"Background:=Transparent",
         L"BorderThickness=0",
@@ -467,6 +472,10 @@ const Theme g_themeTaskbar = {{
     L"PagerPillMargin=8,2,0,2",
     L"PagerPillPadding=10,0,10,0",
     L"PagerChipCornerRadius=12",
+    // Ours: the three pills are rounded like an ordinary (unmaximized)
+    // Windows 11 window, 8 DIPs, rather than $CornerRadius's fully round
+    // ends. The "Taskbar: pill corner radius" setting replaces this value.
+    L"PillCornerRadius=8",
     // Fork: the glass in the three pills. This is the Start menu fork's
     // $CommonBgBrush copied verbatim -- the brush the "TranslucentStartMenu -
     // search, profile & power only" theme paints its own surfaces with -- so
@@ -9056,6 +9065,7 @@ struct {
     bool taskbarStyle;
     bool dockAnimation;
     bool fullSizeIcons;
+    int taskbarCornerRadius;
     bool startMenuStyle;
     int startMenuHeight;
     bool notificationCenterStyle;
@@ -9065,6 +9075,8 @@ void LoadSettings() {
     g_settings.taskbarStyle = Wh_GetIntSetting(L"taskbarStyle") != 0;
     g_settings.dockAnimation = Wh_GetIntSetting(L"dockAnimation") != 0;
     g_settings.fullSizeIcons = Wh_GetIntSetting(L"taskbarFullSizeIcons") != 0;
+    g_settings.taskbarCornerRadius =
+        std::clamp(Wh_GetIntSetting(L"taskbarCornerRadius"), 0, 100);
     g_settings.startMenuStyle = Wh_GetIntSetting(L"startMenuStyle") != 0;
     g_settings.startMenuHeight =
         std::clamp(Wh_GetIntSetting(L"startMenuHeight"), 100, 100000);
@@ -9128,6 +9140,12 @@ void ProcessAllStylesFromSettings() {
     if (g_target == Target::StartMenu) {
         swprintf_s(menuHeight, L"MenuHeight=%d", g_settings.startMenuHeight);
         constants.push_back(menuHeight);
+    }
+    WCHAR pillCornerRadius[48];
+    if (g_target == Target::Taskbar) {
+        swprintf_s(pillCornerRadius, L"PillCornerRadius=%d",
+                   g_settings.taskbarCornerRadius);
+        constants.push_back(pillCornerRadius);
     }
 
     StyleConstants styleConstants = LoadStyleConstants(constants);

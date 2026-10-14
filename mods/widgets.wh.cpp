@@ -63,7 +63,8 @@ only a faint "Nothing listening on port N", or hides if set to.
 ## Top bar
 
 A glass bar along the top of the main screen: the cards' colour and border
-over a blur, with round ends, placed like the Shell Styler's taskbar pills. Maximized windows stop below it, as they do
+over a blur, with the same rounded corners as an ordinary window, placed like
+the Shell Styler's taskbar pills. Maximized windows stop below it, as they do
 above the taskbar, and it hides while an app is fullscreen. It is empty for
 now; the desktop pager and the control center will move onto it.
 
@@ -148,6 +149,11 @@ takes the keyboard until you're done.
   $description: >-
     How strongly the card colour covers the bar's blur. 0 follows the cards'
     background opacity below; 1-100 sets the bar's own.
+- TopBarCornerRadius: 8
+  $name: Top bar corner radius
+  $description: >-
+    8 matches an ordinary window and the taskbar's pills; a large number gives
+    fully round ends.
 - TopBarBlur: true
   $name: Blur behind the top bar
   $description: >-
@@ -258,6 +264,7 @@ struct Settings {
     float topBarHeight = 32;
     float topBarOpacity = 0;  // 0 = the cards' background opacity
     bool topBarBlur = true;
+    float topBarCornerRadius = 8;
 };
 
 Settings g_settings;
@@ -312,6 +319,7 @@ void LoadSettings() {
     s.topBarHeight = (float)(topBarHeight ? std::clamp(topBarHeight, 16, 80) : 32);
     s.topBarOpacity = std::clamp(Wh_GetIntSetting(L"TopBarOpacity"), 0, 100) / 100.0f;
     s.topBarBlur = Wh_GetIntSetting(L"TopBarBlur");
+    s.topBarCornerRadius = (float)std::clamp(Wh_GetIntSetting(L"TopBarCornerRadius"), 0, 100);
     g_settings = std::move(s);
 
     g_locked = Wh_GetIntValue(L"Locked", 0) != 0;
@@ -3241,11 +3249,11 @@ using winrt::Windows::Foundation::Numerics::float3;
 
 // Placed like the Shell Styler's taskbar pills. The tray pill keeps 8 DIPs from
 // the screen's side and 2 from its edge ($TrayPillMargin=0,2,8,2); here that
-// is the top edge, with the same 2 left clear below. $CornerRadius=25 is wider
-// than half of any sensible height, so the ends come out fully round.
+// is the top edge, with the same 2 left clear below. The corner radius is a
+// setting, defaulting to an ordinary Windows 11 window's 8 DIPs, like the
+// taskbar pills' ($PillCornerRadius).
 constexpr float kSideMargin = 8;
 constexpr float kEdgeMargin = 2;
-constexpr float kMaxCornerRadius = 25;
 constexpr float kBorder = 1;  // the cards' border is a 1 DIP hairline too
 
 // Not declared by the toolchain's windows.ui.composition.interop.h.
@@ -3354,7 +3362,7 @@ void Layout() {
     float y = std::round(kEdgeMargin * s);
     float w = std::max(0.0f, client.right - 2 * x);
     float h = std::round(g_settings.topBarHeight * s);
-    float r = std::min(std::round(kMaxCornerRadius * s), h / 2);
+    float r = std::min(std::round(g_settings.topBarCornerRadius * s), h / 2);
     float b = std::max(1.0f, std::round(kBorder * s));
     try {
         g_pill.Offset(float3{x, y, 0});
@@ -3518,7 +3526,7 @@ void Create() {
     DwmSetWindowAttribute(g_hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, &on, sizeof(on));
     // Stays up during Aero Peek, like the taskbar.
     DwmSetWindowAttribute(g_hwnd, DWMWA_EXCLUDED_FROM_PEEK, &on, sizeof(on));
-    // The pill draws its own round ends; DWM's corners would clip the strip.
+    // The pill draws its own rounded corners; DWM's would clip the strip.
     DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
     DwmSetWindowAttribute(g_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
 
