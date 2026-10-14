@@ -9,3 +9,6 @@ build/
 # OS noise
 Thumbs.db
 desktop.ini
+
+# Python bytecode
+__pycache__/

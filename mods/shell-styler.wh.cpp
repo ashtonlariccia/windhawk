@@ -33,6 +33,7 @@ its own switch, so any of them can be turned off without touching the rest.
 |---|---|---|
 | Taskbar | explorer | WindowGlass Pill: centred app pill, detached tray pill, and the pill around the **Desktops** mod's pager |
 | Dock animation | explorer | Taskbar icons grow under the cursor, like the macOS dock |
+| Never shrink icons | explorer | A full taskbar grows the app pill instead of switching to small icons |
 | Start menu | StartMenuExperienceHost | Translucent search-only menu: search, profile and power |
 | System info panel | StartMenuExperienceHost | Task Manager style CPU / memory / disk / network readout in the Start menu |
 | Notification center | ShellExperienceHost, ShellHost | TranslucentShell |
@@ -54,6 +55,12 @@ taskbar.
 - taskbarStyle: true
   $name: "Taskbar: style"
   $description: The WindowGlass Pill theme, including the desktop pager's pill.
+- taskbarFullSizeIcons: true
+  $name: "Taskbar: never shrink icons"
+  $description: >-
+    Icons stay full size when the taskbar fills up. The app pill grows toward
+    the screen edges instead, and only once it spans the whole bar do extra
+    apps go into the overflow menu.
 - dockAnimation: true
   $name: "Taskbar: dock animation"
   $description: Icons grow under the cursor, like the macOS dock.
@@ -217,7 +224,10 @@ const Theme g_themeTaskbar = {{
         L"Width=Auto",
         L"HorizontalAlignment=Right",
         L"Margin=0"}},
-    ThemeTargetStyles{L"Grid#SystemTrayFrameGrid", {
+    // On 26200 SystemTrayFrameGrid is a StackPanel despite its name, so a
+    // Grid-only target never matches and the tray is left without a pill.
+    // Both are listed so older builds keep working.
+    ThemeTargetStyles{L"Grid#SystemTrayFrameGrid, StackPanel#SystemTrayFrameGrid", {
         L"Margin=$TrayPillMargin",
         L"Padding=$TrayPillPadding",
         L"Background:=$PillBackground",
@@ -331,6 +341,12 @@ const Theme g_themeTaskbar = {{
         L"CornerRadius=$CornerRadius"}},
     ThemeTargetStyles{L"Windows.UI.Xaml.Controls.Grid#ModalRootGrid > Windows.UI.Xaml.Controls.Border#BackgroundElement > WindowsInternal.ComposableShell.Experiences.Switcher.SwitchItemList", {
         L"Background:=$Background"}},
+    // The ring around the selected Alt+Tab window is the system focus visual
+    // (2px primary + 1px secondary by default), which reads as far too heavy
+    // against the glass. Thin it to a single hairline ring.
+    ThemeTargetStyles{L"WindowsInternal.ComposableShell.Experiences.Switcher.SwitchItemListViewItem, WindowsInternal.ComposableShell.Experiences.Switcher.SwitchItemThumbnailButton#ThumbnailHost", {
+        L"FocusVisualPrimaryThickness=$SwitcherFocusThickness",
+        L"FocusVisualSecondaryThickness=0"}},
     ThemeTargetStyles{L"WindowsInternal.ComposableShell.Experiences.Switcher.VirtualDesktopBarElement#VirtualDesktopBar > Grid > Border", {
         L"BorderThickness=$BorderThickness",
         L"BorderBrush:=$BorderBrush",
@@ -415,6 +431,7 @@ const Theme g_themeTaskbar = {{
     L"ElementSysColor3=<SolidColorBrush Color=\"{ThemeResource SystemAccentColorLight3}\" Opacity=\"1\" />",
     L"ElementSysColor4=<SolidColorBrush Color=\"{ThemeResource SystemAccentColorDark1}\" Opacity=\"1\" />",
     L"BorderThickness=0.5,1,0.5,1",
+    L"SwitcherFocusThickness=1",
     L"CornerRadius=25",
     L"TrayPadding=2,4,2,4",
     L"Height=70",
@@ -428,13 +445,18 @@ const Theme g_themeTaskbar = {{
     //
     // The strip kept clear at each end of the bar, so the app pill stops
     // before it slides under the tray pill on the right or the pager pill on
-    // the left. scripts\measure-pills.ps1 derives it: the tray pill reaches
-    // 246 DIP in from the right edge (chevron, network, volume, battery,
-    // clock, show-desktop), plus a tray icon's worth of headroom, rounds to
-    // 270. The pager end reaches only 121, so it does not bind until you run
-    // a lot of virtual desktops. Raise it if either pill ever overlaps the
-    // apps, lower it to hand the width back.
-    L"AppPillGutter=270",
+    // the left. scripts\measure-pills.ps1 derives the clear-of-both value:
+    // the tray pill reaches 246 DIP in from the right edge (chevron,
+    // network, volume, battery, clock, show-desktop), plus a tray icon's
+    // worth of headroom, rounds to 270. The pager end reaches only 121.
+    //
+    // It is 0 by choice: with "Taskbar: never shrink icons" on, a full
+    // taskbar grows the app pill into these strips -- sliding under the
+    // tray and pager pills -- rather than shrinking the icons or sending
+    // apps to the overflow menu early. The pill is centred and sized to its
+    // buttons, so this changes nothing until it is that full. Set 270 to
+    // keep the pills from ever overlapping.
+    L"AppPillGutter=0",
     L"AppPillMargin=0,2,12,2",
     L"AppPillPadding=10,0,10,0",
     L"TrayPillMargin=0,2,8,2",
@@ -9033,6 +9055,7 @@ void MergeResourceVariables() {
 struct {
     bool taskbarStyle;
     bool dockAnimation;
+    bool fullSizeIcons;
     bool startMenuStyle;
     int startMenuHeight;
     bool notificationCenterStyle;
@@ -9041,6 +9064,7 @@ struct {
 void LoadSettings() {
     g_settings.taskbarStyle = Wh_GetIntSetting(L"taskbarStyle") != 0;
     g_settings.dockAnimation = Wh_GetIntSetting(L"dockAnimation") != 0;
+    g_settings.fullSizeIcons = Wh_GetIntSetting(L"taskbarFullSizeIcons") != 0;
     g_settings.startMenuStyle = Wh_GetIntSetting(L"startMenuStyle") != 0;
     g_settings.startMenuHeight =
         std::clamp(Wh_GetIntSetting(L"startMenuHeight"), 100, 100000);
@@ -9066,6 +9090,10 @@ bool IsStylingEnabled() {
 
 bool IsDockEnabled() {
     return g_target == Target::Taskbar && g_settings.dockAnimation;
+}
+
+bool IsFullSizeIconsEnabled() {
+    return g_target == Target::Taskbar && g_settings.fullSizeIcons;
 }
 
 const Theme* GetThemeForTarget() {
@@ -9604,11 +9632,6 @@ struct {
     double lerpSpeed;
     bool disableBounce;
 } g_settings;
-
-
-// Global flags
-std::atomic<bool> g_taskbarViewDllLoaded = false;
-std::atomic<bool> g_hooksApplied = false;
 
 // Animation Loop Globals
 winrt::event_token g_renderingToken;
@@ -10621,12 +10644,8 @@ void LoadSettings() {
     g_settings.disableBounce = Wh_GetIntSetting(L"dockBounce") == 0;
 }
 
-HMODULE GetTaskbarViewModuleHandle() {
-    HMODULE module = GetModuleHandle(L"Taskbar.View.dll");
-    if (!module) module = GetModuleHandle(L"ExplorerExtensions.dll");
-    return module;
-}
-
+// Called by the shared Taskbar.View.dll loader at the top level, which the
+// full-size icons feature hooks through too.
 bool HookTaskbarViewDllSymbols(HMODULE module) {
     // Taskbar.View.dll
     WindhawkUtils::SYMBOL_HOOK taskbarViewHooks[] = {
@@ -10653,55 +10672,11 @@ bool HookTaskbarViewDllSymbols(HMODULE module) {
     return true;
 }
 
-using LoadLibraryExW_t = decltype(&LoadLibraryExW);
-LoadLibraryExW_t LoadLibraryExW_Original;
-
-// Lazy hook path (if Taskbar.View.dll loads later)
-HMODULE WINAPI LoadLibraryExW_Hook(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
-    HMODULE module = LoadLibraryExW_Original(lpLibFileName, hFile, dwFlags);
-    if (!module) return module;
-
-    if (!g_taskbarViewDllLoaded && GetTaskbarViewModuleHandle() == module) {
-        if (!g_taskbarViewDllLoaded.exchange(true)) {
-            Wh_Log(L"Dock: Taskbar.View.dll loaded, hooking symbols...");
-            if (HookTaskbarViewDllSymbols(module)) {
-                if (!g_hooksApplied.exchange(true)) {
-                    Wh_ApplyHookOperations();
-                    Wh_Log(L"Dock: Hooks applied (slow path).");
-                }
-            }
-        }
-    }
-    return module;
-}
-
-// Entry points, called from the mod's own when the dock is enabled.
-BOOL Init() {
+// Entry points, called from the mod's own when the dock is enabled. The
+// Taskbar.View.dll hooks are set by the shared loader, not here.
+void Init() {
     Wh_Log(L"Dock: Wh_ModInit");
     LoadSettings();
-
-    if (HMODULE taskbarViewModule = GetTaskbarViewModuleHandle()) {
-        g_taskbarViewDllLoaded = true;
-        if (!HookTaskbarViewDllSymbols(taskbarViewModule)) return FALSE;
-    } else {
-        HMODULE kernelBaseModule = GetModuleHandle(L"kernelbase.dll");
-        auto pKernelBaseLibraryExW =
-            (decltype(&LoadLibraryExW))GetProcAddress(kernelBaseModule, "LoadLibraryExW");
-        WindhawkUtils::SetFunctionHook(
-            pKernelBaseLibraryExW,
-            LoadLibraryExW_Hook,
-            &LoadLibraryExW_Original);
-    }
-    return TRUE;
-}
-
-void AfterInit() {
-    Wh_Log(L"Dock: Wh_ModAfterInit");
-
-    if (g_taskbarViewDllLoaded) {
-        g_hooksApplied = true;
-        Wh_Log(L"Dock: Hooks already applied by Windhawk (fast path).");
-    }
 }
 
 void BeforeUninit() {
@@ -10743,8 +10718,6 @@ void BeforeUninit() {
     else {
         g_contexts.clear();
     }
-    g_taskbarViewDllLoaded = false;
-    g_hooksApplied = false;
 }
 
 void SettingsChanged() {
@@ -10771,6 +10744,106 @@ void SettingsChanged() {
 }
 
 }  // namespace dock
+
+////////////////////////////////////////////////////////////////////////////////
+// Full-size taskbar icons (explorer only)
+
+namespace fullsize {
+
+// When the buttons outgrow the frame, TaskbarCollapsibleLayout's
+// CollapseTaskbarItems first calls TryShrinkIcons, which is Windows' dynamic
+// icon scaling ("Show smaller taskbar buttons: when taskbar is full"): it
+// drops every icon to the small size and returns the width they now take.
+// Only if that still doesn't fit does it move items into the overflow flyout.
+//
+// Returning the width unchanged is what TryShrinkIcons itself returns when it
+// can't shrink any further, so the caller goes straight on to overflow -- but
+// that now happens only once the frame can't grow any more. With the taskbar
+// theme on, the frame spans the whole bar (see $AppPillGutter), so the pill
+// takes the full width before anything overflows.
+using TryShrinkIcons_t = float(WINAPI*)(void* pThis,
+                                        void* layoutContext,
+                                        float width);
+TryShrinkIcons_t TryShrinkIcons_Original;
+float WINAPI TryShrinkIcons_Hook(void* pThis, void* layoutContext, float width) {
+    return width;
+}
+
+bool HookTaskbarViewDllSymbols(HMODULE module) {
+    // Taskbar.View.dll
+    WindhawkUtils::SYMBOL_HOOK taskbarViewHooks[] = {
+        {
+            {LR"(protected: float __cdecl winrt::Taskbar::implementation::TaskbarCollapsibleLayoutBase<struct winrt::Taskbar::implementation::TaskbarCollapsibleLayoutXamlTraits>::TryShrinkIcons(struct winrt::Taskbar::implementation::TaskbarCollapsibleLayoutBase<struct winrt::Taskbar::implementation::TaskbarCollapsibleLayoutXamlTraits>::LayoutContext &,float))"},
+            &TryShrinkIcons_Original,
+            TryShrinkIcons_Hook,
+        },
+    };
+    if (!HookSymbols(module, taskbarViewHooks, ARRAYSIZE(taskbarViewHooks))) {
+        Wh_Log(L"Full-size icons: HookSymbols failed.");
+        return false;
+    }
+    return true;
+}
+
+}  // namespace fullsize
+
+////////////////////////////////////////////////////////////////////////////////
+// Taskbar.View.dll hooks, shared by the dock and full-size icons.
+
+// Captured at init: switching a feature on or off reloads the mod.
+bool g_dockActive;
+bool g_fullSizeIconsActive;
+
+std::atomic<bool> g_taskbarViewDllLoaded = false;
+
+HMODULE GetTaskbarViewModuleHandle() {
+    HMODULE module = GetModuleHandle(L"Taskbar.View.dll");
+    if (!module) module = GetModuleHandle(L"ExplorerExtensions.dll");
+    return module;
+}
+
+bool HookTaskbarViewDllSymbols(HMODULE module) {
+    bool ok = true;
+    if (g_dockActive) {
+        ok = dock::HookTaskbarViewDllSymbols(module) && ok;
+    }
+    if (g_fullSizeIconsActive) {
+        ok = fullsize::HookTaskbarViewDllSymbols(module) && ok;
+    }
+    return ok;
+}
+
+using LoadLibraryExW_t = decltype(&LoadLibraryExW);
+LoadLibraryExW_t LoadLibraryExW_Original;
+
+// Lazy hook path, for when Taskbar.View.dll loads after the mod.
+HMODULE WINAPI LoadLibraryExW_Hook(LPCWSTR lpLibFileName,
+                                   HANDLE hFile,
+                                   DWORD dwFlags) {
+    HMODULE module = LoadLibraryExW_Original(lpLibFileName, hFile, dwFlags);
+    if (module && !g_taskbarViewDllLoaded &&
+        GetTaskbarViewModuleHandle() == module &&
+        !g_taskbarViewDllLoaded.exchange(true)) {
+        Wh_Log(L"Taskbar.View.dll loaded, hooking symbols");
+        HookTaskbarViewDllSymbols(module);
+        Wh_ApplyHookOperations();
+    }
+    return module;
+}
+
+void HookTaskbarView() {
+    if (HMODULE taskbarViewModule = GetTaskbarViewModuleHandle()) {
+        g_taskbarViewDllLoaded = true;
+        HookTaskbarViewDllSymbols(taskbarViewModule);
+    } else {
+        HMODULE kernelBaseModule = GetModuleHandle(L"kernelbase.dll");
+        auto pKernelBaseLoadLibraryExW = (decltype(&LoadLibraryExW))
+            GetProcAddress(kernelBaseModule, "LoadLibraryExW");
+        WindhawkUtils::SetFunctionHook(pKernelBaseLoadLibraryExW,
+                                       LoadLibraryExW_Hook,
+                                       &LoadLibraryExW_Original);
+    }
+}
 
 using CreateWindowExW_t = decltype(&CreateWindowExW);
 CreateWindowExW_t CreateWindowExW_Original;
@@ -10915,9 +10988,9 @@ std::vector<HWND> GetHostWnds() {
 // Entry points
 
 // Captured at init: switching a surface on or off reloads the mod, and only
-// what was running needs to be torn down.
+// what was running needs to be torn down. The dock and full-size icon flags
+// live with the Taskbar.View.dll loader above.
 bool g_stylingActive;
-bool g_dockActive;
 
 bool DetectTarget() {
     WCHAR moduleFilePath[MAX_PATH];
@@ -11004,6 +11077,7 @@ BOOL Wh_ModInit() {
 
     g_stylingActive = IsStylingEnabled();
     g_dockActive = IsDockEnabled();
+    g_fullSizeIconsActive = IsFullSizeIconsEnabled();
 
     if (g_stylingActive) {
         if (g_target == Target::StartMenu) {
@@ -11021,6 +11095,10 @@ BOOL Wh_ModInit() {
 
     if (g_dockActive) {
         dock::Init();
+    }
+
+    if (g_dockActive || g_fullSizeIconsActive) {
+        HookTaskbarView();
     }
 
     return TRUE;
@@ -11043,9 +11121,6 @@ void Wh_ModAfterInit() {
         }
     }
 
-    if (g_dockActive) {
-        dock::AfterInit();
-    }
 }
 
 void Wh_ModBeforeUninit() {
@@ -11087,7 +11162,8 @@ BOOL Wh_ModSettingsChanged(BOOL* bReload) {
     // A surface or the dock switching on or off changes which hooks this
     // process needs, so start over rather than patch the running state.
     if (IsStylingEnabled() != g_stylingActive ||
-        IsDockEnabled() != g_dockActive) {
+        IsDockEnabled() != g_dockActive ||
+        IsFullSizeIconsEnabled() != g_fullSizeIconsActive) {
         *bReload = TRUE;
         return TRUE;
     }

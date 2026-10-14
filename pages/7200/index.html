@@ -1,0 +1,124 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>System</title>
+<style>
+  :root {
+    --text: #f2f2f2; --dim: #f2f2f299; --track: #ffffff1f;
+    --cpu: #5aa9ff; --mem: #b58cff; --rx: #4cd08a; --tx: #ffb454;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --text: #1b1b1b; --dim: #1b1b1b99; --track: #0000001a; }
+  }
+  html, body { margin: 0; background: transparent; color: var(--text);
+    font: 12px "Segoe UI Variable Display", system-ui, sans-serif; overflow: hidden;
+    user-select: none; }
+  body { display: grid; gap: 8px; padding: 2px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .label { color: var(--dim); }
+  .value { font-variant-numeric: tabular-nums; font-weight: 600; }
+  canvas { width: 100%; height: 38px; display: block; }
+  .cores { display: flex; gap: 2px; height: 14px; align-items: end; }
+  .cores i { flex: 1; background: var(--cpu); border-radius: 1px; min-height: 1px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .bar b { display: block; height: 100%; background: var(--dim); }
+  .disks { display: grid; gap: 4px; }
+  .foot { color: var(--dim); display: flex; justify-content: space-between; }
+</style>
+
+<section>
+  <div class="row"><span class="label">CPU</span><span class="value" id="cpu">–</span></div>
+  <canvas id="cpuGraph"></canvas>
+  <div class="cores" id="cores"></div>
+</section>
+<section>
+  <div class="row"><span class="label">Memory</span><span class="value" id="mem">–</span></div>
+  <canvas id="memGraph"></canvas>
+</section>
+<section>
+  <div class="row"><span class="label">Network</span>
+    <span class="value"><span style="color:var(--rx)" id="rx">–</span> ↓ &nbsp;
+      <span style="color:var(--tx)" id="tx">–</span> ↑</span></div>
+  <canvas id="netGraph"></canvas>
+</section>
+<section class="disks" id="disks"></section>
+<div class="foot"><span id="uptime"></span><span id="battery"></span></div>
+
+<script>
+const HISTORY = 60;
+const $ = id => document.getElementById(id);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const series = { cpu: [], mem: [], rx: [], tx: [] };
+
+function push(list, v) { list.push(v); if (list.length > HISTORY) list.shift(); }
+
+function bytes(n, perSecond) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + " " + units[i] + (perSecond ? "/s" : "");
+}
+
+function duration(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+  return "up " + (d ? d + "d " : "") + h + "h " + m + "m";
+}
+
+// Filled line graphs over a fixed 60-sample window; max is the top of the scale.
+function graph(canvas, lines, max) {
+  const dpr = devicePixelRatio, w = canvas.clientWidth * dpr, h = canvas.clientHeight * dpr;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const g = canvas.getContext("2d");
+  g.clearRect(0, 0, w, h);
+  const step = w / (HISTORY - 1);
+  for (const [data, color] of lines) {
+    if (data.length < 2) continue;
+    const x0 = w - (data.length - 1) * step;
+    g.beginPath();
+    data.forEach((v, i) => {
+      const x = x0 + i * step, y = h - Math.min(v / max, 1) * (h - dpr) - dpr / 2;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.strokeStyle = color; g.lineWidth = 1.5 * dpr; g.stroke();
+    g.lineTo(w, h); g.lineTo(x0, h); g.closePath();
+    g.globalAlpha = 0.18; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+  }
+}
+
+function draw(info) {
+  push(series.cpu, info.cpu.total);
+  $("cpu").textContent = Math.round(info.cpu.total) + "%";
+  graph($("cpuGraph"), [[series.cpu, css("--cpu")]], 100);
+
+  const cores = $("cores");
+  if (cores.children.length !== info.cpu.cores.length) {
+    cores.replaceChildren(...info.cpu.cores.map(() => document.createElement("i")));
+  }
+  info.cpu.cores.forEach((v, i) => cores.children[i].style.height = v + "%");
+
+  const memPct = 100 * info.mem.used / info.mem.total;
+  push(series.mem, memPct);
+  $("mem").textContent = bytes(info.mem.used) + " / " + bytes(info.mem.total);
+  graph($("memGraph"), [[series.mem, css("--mem")]], 100);
+
+  push(series.rx, info.net.rx);
+  push(series.tx, info.net.tx);
+  $("rx").textContent = bytes(info.net.rx, true);
+  $("tx").textContent = bytes(info.net.tx, true);
+  const netMax = Math.max(64 * 1024, ...series.rx, ...series.tx);
+  graph($("netGraph"), [[series.rx, css("--rx")], [series.tx, css("--tx")]], netMax);
+
+  $("disks").innerHTML = info.disks.map(d => {
+    const used = d.total - d.free;
+    return `<div class="row"><span class="label">${d.name}</span>` +
+      `<span class="value">${bytes(d.free)} free</span></div>` +
+      `<div class="bar"><b style="width:${(100 * used / d.total).toFixed(1)}%"></b></div>`;
+  }).join("");
+
+  $("uptime").textContent = duration(info.uptime);
+  $("battery").textContent = info.battery
+    ? info.battery.percent + "%" + (info.battery.charging ? " ⚡" : "") : "";
+}
+
+if (window.windhawk) windhawk.sysinfo(draw);
+else document.body.textContent = "Open this in a Windhawk web box.";
+</script>

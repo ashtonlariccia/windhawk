@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>System (compact)</title>
+<style>
+  :root { --text: #f2f2f2; --dim: #f2f2f299; --track: #ffffff1f; --fill: #5aa9ff; }
+  @media (prefers-color-scheme: light) {
+    :root { --text: #1b1b1b; --dim: #1b1b1b99; --track: #0000001a; }
+  }
+  html, body { margin: 0; background: transparent; color: var(--text);
+    font: 12px "Segoe UI Variable Display", system-ui, sans-serif; overflow: hidden;
+    user-select: none; }
+  body { display: grid; gap: 6px; padding: 2px; }
+  .row { display: grid; grid-template-columns: 34px 1fr 64px; gap: 8px; align-items: center; }
+  .label { color: var(--dim); }
+  .value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .bar { height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .bar b { display: block; height: 100%; width: 0; background: var(--fill);
+    transition: width 90ms linear; }
+</style>
+
+<div class="row"><span class="label">CPU</span><div class="bar"><b id="cpuBar"></b></div>
+  <span class="value" id="cpu">–</span></div>
+<div class="row"><span class="label">RAM</span><div class="bar"><b id="memBar"></b></div>
+  <span class="value" id="mem">–</span></div>
+<div class="row"><span class="label">Net</span><span class="label" id="net"></span>
+  <span class="value" id="rx">–</span></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function rate(n) {
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + " " + units[i];
+}
+
+function draw(info) {
+  $("cpu").textContent = Math.round(info.cpu.total) + "%";
+  $("cpuBar").style.width = info.cpu.total + "%";
+  const mem = 100 * info.mem.used / info.mem.total;
+  $("mem").textContent = Math.round(mem) + "%";
+  $("memBar").style.width = mem + "%";
+  $("net").textContent = "↑ " + rate(info.net.tx);
+  $("rx").textContent = "↓ " + rate(info.net.rx);
+}
+
+if (window.windhawk) windhawk.sysinfo(draw);
+else document.body.textContent = "Open this in a Windhawk web box.";
+</script>

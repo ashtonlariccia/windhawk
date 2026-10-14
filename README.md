@@ -6,9 +6,9 @@ of behaviour tweaks. Four mods, each feature inside them on its own switch.
 | Mod | Runs in | Features |
 |---|---|---|
 | [`desktops`](mods/desktops.wh.cpp) | explorer | Desktop pager on the taskbar · Win+1…0 / Win+N / Win+Q keybinds · Task View slide on switch |
-| [`shell-styler`](mods/shell-styler.wh.cpp) | explorer, Start menu, notification center | Taskbar, Start menu and notification center themes · Start menu system info panel · taskbar dock animation |
-| [`tweaks`](mods/tweaks.wh.cpp) | every app | Genie minimize · auto-hide taskbar when maximized · Alt+Tab delay · desktop drag-select · MB/GB file sizes |
-| [`widgets`](mods/widgets.wh.cpp) | explorer | Desktop calendar · now-playing card |
+| [`shell-styler`](mods/shell-styler.wh.cpp) | explorer, Start menu, notification center | Taskbar, Start menu and notification center themes · Start menu system info panel · taskbar dock animation · never-shrink taskbar icons |
+| [`tweaks`](mods/tweaks.wh.cpp) | every app | Genie minimize · auto-hide taskbar when maximized · maximized-window margins · Alt+Tab delay · desktop drag-select · MB/GB file sizes |
+| [`widgets`](mods/widgets.wh.cpp) | explorer | Desktop calendar · now-playing card · output boxes · top bar |
 
 This replaced, on 2026-09-25, ten separately installed mods plus PowerToys
 Keyboard Manager driving `VirtualDesktop11-24H2.exe` for the desktop keybinds.
@@ -87,6 +87,48 @@ there after Win+D. They never activate when clicked.
   title, artist, prev / play-pause / next, click-to-seek progress bar. Fades
   out when nothing has a session. The WinRT calls run on their own MTA thread;
   the UI thread only draws.
+* **Output boxes** -- a resizable box per configured port that is nothing
+  but a program's output: no title or controls, a faint "Nothing listening
+  on port N" while offline. Plain TCP, no browser: the first output on each
+  connection replaces the box (so a service can answer every connection with
+  a snapshot and close; the box reconnects every *Refresh* seconds), a form
+  feed or `ESC[2J` clears it, and a service that keeps the connection open
+  just streams. Sockets run on the UI thread through `WSAAsyncSelect`; a
+  small VT parser handles colours, carriage-return overwrites and cursor
+  movement. Click the box to type: the line is edited and drawn inline after
+  the output, terminal-style, and sent on Enter. The keys come from an
+  invisible one-pixel window that takes the foreground on that click -- the
+  cards themselves can't take focus -- and typing ends when anything else is
+  activated. Press-and-move still drags the box.
+  `scripts/serve-output.py` turns a command into such a service: `--show` /
+  `--input` snapshots, `--notes FILE`, or `--repl` for a long-running process.
+  (This replaced WebView2 web boxes, which never loaded reliably; they are in
+  `build/widgets-webboxes-backup-20260927.wh.cpp`.)
+* **Top bar** -- a glass pill across the top of the primary monitor: the
+  cards' colour, opacity and border over a blur, with round ends and the
+  taskbar pills' 8 / 2 DIP margins. It's an app bar, so the work area starts below it, and it hides
+  for fullscreen apps. Unlike the cards it is composed with
+  Windows.UI.Composition -- DWM's host backdrop brush is the only way to blur
+  what's behind a window -- and it's topmost, unowned, and doesn't fade. Empty
+  for now; the pager and control center are to move onto it, each behind a
+  toggle in both this mod and Desktops so the two never fight over them.
+
+Cards fade out while an app window is focused and back in when the desktop is
+focused or no app window is open on the screen (all minimized, Win+D, the last
+one closed). Shell surfaces -- taskbar, Start, search, Alt+Tab, Task View --
+leave them as they are. It's driven by `SetWinEventHook` (foreground,
+minimize, window hide/destroy, cloak for virtual desktop switches),
+acted on immediately (so the fade starts on the genie's first frame -- the genie
+minimizes or restores the window as it begins) and re-checked 40 ms later;
+the fade runs the genie's length, read live from tweaks' `genieDurationMs`,
+on its smoothstep curve. "Open" means visible, not minimized, not cloaked, unowned and not a
+tool window. Switch: *Fade out while a window is focused*. A focused app window
+counts even while cloaked, since the genie cloaks a restoring window for its
+whole rise.
+
+All card animations step at the display's refresh rate (capped at 240 Hz) on a
+high-resolution waitable timer the UI thread's message loop waits on, timed by
+the performance counter; a window timer can't go below ~15.6 ms.
 
 Drag a card to move it (grid + screen-edge snapping, position saved in the
 mod's storage). Right-click for **Lock positions** (then only Alt+drag moves)

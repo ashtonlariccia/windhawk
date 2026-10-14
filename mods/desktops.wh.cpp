@@ -6,7 +6,7 @@
 // @author          ashtonlariccia
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -lole32 -loleaut32 -lruntimeobject -luuid
+// @compilerOptions -lole32 -loleaut32 -lruntimeobject -luuid -ladvapi32
 // ==/WindhawkMod==
 
 // Source code is published under The GNU General Public License v3.0.
@@ -45,6 +45,7 @@ on it.
 | `Win+1` ... `Win+9`, `Win+0` | Switch to desktop 1 ... 9, 10. Does nothing if that desktop doesn't exist |
 | `Win+N` | Create a new desktop and switch to it |
 | `Win+Q` | Close the current desktop; its windows move to the neighbouring one |
+| `Win+Shift+1` ... `Win+Shift+0` | Move the focused window to desktop 1 ... 10, staying where you are |
 
 These replace the Windows shortcuts on the same keys (pinned taskbar apps, the
 notification centre, search) for as long as they are enabled.
@@ -97,6 +98,10 @@ version** setting is an escape hatch for when a future build needs a new ID.
   $name: "Keybind: Win+N creates a desktop"
 - KeyClose: true
   $name: "Keybind: Win+Q closes the current desktop"
+- KeyMove: true
+  $name: "Keybind: Win+Shift+1 ... Win+Shift+0 moves the focused window"
+  $description: >-
+    Sends the focused window to that desktop without switching to it.
 - SwitchAnimation: true
   $name: Animate desktop switches
   $description: >-
@@ -133,8 +138,8 @@ version** setting is an escape hatch for when a future build needs a new ID.
 - PollIntervalMs: 400
   $name: Refresh interval (ms)
   $description: >-
-    How often the desktop list is re-read. Changes made by this mod's own
-    chips and keybinds show immediately regardless.
+    Only used if Windows won't send desktop change notifications, which it
+    normally does -- then the pager updates instantly and doesn't poll.
 - WindowsVersion: auto
   $name: Windows version
   $description: >-
@@ -396,6 +401,7 @@ struct {
     bool keySwitch;
     bool keyNew;
     bool keyClose;
+    bool keyMove;
     bool uiAnimations;
     bool hoverCard;
     double chipSize;
@@ -418,6 +424,7 @@ static void LoadSettings() {
     g_settings.keySwitch = Wh_GetIntSetting(L"KeySwitch") != 0;
     g_settings.keyNew = Wh_GetIntSetting(L"KeyNew") != 0;
     g_settings.keyClose = Wh_GetIntSetting(L"KeyClose") != 0;
+    g_settings.keyMove = Wh_GetIntSetting(L"KeyMove") != 0;
     g_settings.uiAnimations = Wh_GetIntSetting(L"UiAnimations") != 0;
     g_settings.hoverCard = Wh_GetIntSetting(L"HoverCard") != 0;
 
@@ -474,6 +481,138 @@ struct DesktopSnapshot {
     }
 };
 
+// {AA509086-5CA9-4C25-8F95-589D3C07B48A}
+static const CLSID CLSID_VirtualDesktopManagerPublic = {
+    0xAA509086,
+    0x5CA9,
+    0x4C25,
+    {0x8F, 0x95, 0x58, 0x9D, 0x3C, 0x07, 0xB4, 0x8A}};
+
+// {A5CD92FF-29BE-454C-8D04-D82879FB3F1B}
+static const IID IID_IVirtualDesktopManagerPublic = {
+    0xA5CD92FF,
+    0x29BE,
+    0x454C,
+    {0x8D, 0x04, 0xD8, 0x28, 0x79, 0xFB, 0x3F, 0x1B}};
+
+// The documented interface -- unlike the internal one above, this is a stable
+// public API, which is why the hover card's window lookup carries no version
+// risk at all.
+struct IVirtualDesktopManagerPublic : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE IsWindowOnCurrentVirtualDesktop(HWND,
+                                                                      BOOL*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetWindowDesktopId(HWND, GUID*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE MoveWindowToDesktop(HWND, REFGUID) = 0;
+};
+
+// {1841C6D7-4F9D-42C0-AF41-8747538F10E5}
+// Stable since Windows 10 1809; only GetViewForHwnd is ever called.
+static const IID IID_IApplicationViewCollection = {
+    0x1841C6D7,
+    0x4F9D,
+    0x42C0,
+    {0xAF, 0x41, 0x87, 0x47, 0x53, 0x8F, 0x10, 0xE5}};
+
+struct IApplicationViewCollection : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE GetViews(IObjectArray**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewsByZOrder(IObjectArray**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewsByAppUserModelId(PCWSTR,
+                                                               IObjectArray**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewForHwnd(HWND, IUnknown**) = 0;
+};
+
+// =============================================================================
+// Desktop change notifications
+// =============================================================================
+//
+// Instead of re-reading the desktop list on a timer, the pager asks the shell
+// to call it when desktops change. The notification interface's ID and method
+// list differ between Windows builds -- which is why every method here does the
+// same thing, wake the worker to re-read, and ignores its arguments. Which
+// method the shell calls, and with what, then doesn't matter; on x64 the caller
+// cleans up the stack, so the arguments can't unbalance anything. The object
+// answers to each build's interface ID it knows. If none is accepted, the
+// pager falls back to polling.
+
+// {A501FDEC-4A09-464C-AE4E-1B9C21B84918}
+static const CLSID CLSID_VirtualDesktopNotificationService = {
+    0xA501FDEC,
+    0x4A09,
+    0x464C,
+    {0xAE, 0x4E, 0x1B, 0x9C, 0x21, 0xB8, 0x49, 0x18}};
+
+// {0CD45E71-D927-4F15-8B0A-8FEF525337BF}
+static const IID IID_IVirtualDesktopNotificationService = {
+    0x0CD45E71,
+    0xD927,
+    0x4F15,
+    {0x8B, 0x0A, 0x8F, 0xEF, 0x52, 0x53, 0x37, 0xBF}};
+
+struct IVirtualDesktopNotificationService : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE Register(IUnknown*, DWORD*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Unregister(DWORD) = 0;
+};
+
+static const IID kVirtualDesktopNotificationIIDs[] = {
+    // Windows 11 26100+ (24H2 / 25H2).
+    {0xB9E5E94D, 0x233E, 0x49AB, {0xAF, 0x5C, 0x2B, 0x45, 0x41, 0xC3, 0xAA, 0xDE}},
+    // Windows 11 22621 / 22631 (22H2 / 23H2).
+    {0xCD403E52, 0xDEED, 0x4C13, {0xB4, 0x37, 0xB9, 0x83, 0x80, 0xF2, 0xB1, 0xE8}},
+};
+
+static void WakeWorkerForDesktopChange();
+
+#define VDP_NOTIFY_METHOD(n)                                                  \
+    virtual HRESULT STDMETHODCALLTYPE Notify##n(void*, void*, void*, void*) { \
+        WakeWorkerForDesktopChange();                                         \
+        return S_OK;                                                          \
+    }
+
+// A single static instance: the shell's AddRef/Release are no-ops, so no
+// lifetime can outlive the registration.
+class DesktopChangeNotifier : public IUnknown {
+   public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) {
+            return E_POINTER;
+        }
+        bool known = IsEqualIID(riid, IID_IUnknown);
+        for (const auto& iid : kVirtualDesktopNotificationIIDs) {
+            known = known || IsEqualIID(riid, iid);
+        }
+        if (!known) {
+            *ppv = nullptr;
+            return E_NOINTERFACE;
+        }
+        *ppv = this;
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+
+    // More slots than any known build's interface has.
+    VDP_NOTIFY_METHOD(0)
+    VDP_NOTIFY_METHOD(1)
+    VDP_NOTIFY_METHOD(2)
+    VDP_NOTIFY_METHOD(3)
+    VDP_NOTIFY_METHOD(4)
+    VDP_NOTIFY_METHOD(5)
+    VDP_NOTIFY_METHOD(6)
+    VDP_NOTIFY_METHOD(7)
+    VDP_NOTIFY_METHOD(8)
+    VDP_NOTIFY_METHOD(9)
+    VDP_NOTIFY_METHOD(10)
+    VDP_NOTIFY_METHOD(11)
+    VDP_NOTIFY_METHOD(12)
+    VDP_NOTIFY_METHOD(13)
+    VDP_NOTIFY_METHOD(14)
+    VDP_NOTIFY_METHOD(15)
+};
+
+#undef VDP_NOTIFY_METHOD
+
+static DesktopChangeNotifier g_desktopChangeNotifier;
+
 // =============================================================================
 // Engine -- owns every COM pointer, lives entirely on the worker thread
 // =============================================================================
@@ -521,6 +660,14 @@ class VirtualDesktopEngine {
             m_version = &candidate;
             VDPLOG(L"Connected as %s, %u desktop(s)", candidate.description,
                    count);
+
+            // Both optional: without the view collection only explorer's
+            // own windows can be moved, and without notifications the
+            // pager polls.
+            m_serviceProvider->QueryService(
+                IID_IApplicationViewCollection, IID_IApplicationViewCollection,
+                reinterpret_cast<void**>(&m_viewCollection));
+            RegisterNotifications();
             return true;
         }
 
@@ -530,6 +677,16 @@ class VirtualDesktopEngine {
     }
 
     void Disconnect() {
+        if (m_notificationService) {
+            m_notificationService->Unregister(m_notificationCookie);
+            m_notificationService->Release();
+            m_notificationService = nullptr;
+            m_notificationCookie = 0;
+        }
+        if (m_viewCollection) {
+            m_viewCollection->Release();
+            m_viewCollection = nullptr;
+        }
         if (m_manager) {
             m_manager->Release();
             m_manager = nullptr;
@@ -542,6 +699,49 @@ class VirtualDesktopEngine {
     }
 
     bool IsConnected() const { return m_manager != nullptr; }
+
+    bool HasNotifications() const { return m_notificationService != nullptr; }
+
+    // Zero-based. Moves the window without switching; a desktop that doesn't
+    // exist, or the one it's already on, is a no-op.
+    bool MoveWindowToIndex(HWND hwnd,
+                           int index,
+                           IVirtualDesktopManagerPublic* publicManager) {
+        if (!m_manager || !hwnd) {
+            return false;
+        }
+
+        IVirtualDesktop* desktop = GetAt(index);
+        if (!desktop) {
+            return false;
+        }
+
+        bool moved = false;
+        DWORD processId = 0;
+        GetWindowThreadProcessId(hwnd, &processId);
+
+        if (processId == GetCurrentProcessId()) {
+            // The documented call works, but only for the caller's own
+            // windows -- here, explorer's.
+            GUID id{};
+            moved = publicManager && SUCCEEDED(desktop->GetId(&id)) &&
+                    SUCCEEDED(publicManager->MoveWindowToDesktop(hwnd, id));
+        } else if (m_viewCollection) {
+            IUnknown* view = nullptr;
+            if (SUCCEEDED(m_viewCollection->GetViewForHwnd(hwnd, &view)) &&
+                view) {
+                HRESULT hr = m_manager->MoveViewToDesktop(view, desktop);
+                if (FAILED(hr)) {
+                    VDPLOG(L"MoveViewToDesktop failed: 0x%08X", hr);
+                }
+                moved = SUCCEEDED(hr);
+                view->Release();
+            }
+        }
+
+        desktop->Release();
+        return moved;
+    }
 
     bool ReadSnapshot(DesktopSnapshot* snapshot) {
         if (!m_manager) {
@@ -673,6 +873,29 @@ class VirtualDesktopEngine {
     }
 
    private:
+    void RegisterNotifications() {
+        if (FAILED(m_serviceProvider->QueryService(
+                CLSID_VirtualDesktopNotificationService,
+                IID_IVirtualDesktopNotificationService,
+                reinterpret_cast<void**>(&m_notificationService))) ||
+            !m_notificationService) {
+            m_notificationService = nullptr;
+            VDPLOG(L"No notification service, polling");
+            return;
+        }
+
+        HRESULT hr = m_notificationService->Register(&g_desktopChangeNotifier,
+                                                     &m_notificationCookie);
+        if (FAILED(hr)) {
+            VDPLOG(L"Notification Register failed: 0x%08X, polling", hr);
+            m_notificationService->Release();
+            m_notificationService = nullptr;
+            return;
+        }
+
+        VDPLOG(L"Desktop change notifications registered");
+    }
+
     static constexpr int kAdjacentLeft = 3;
     static constexpr int kAdjacentRight = 4;
 
@@ -764,7 +987,11 @@ class VirtualDesktopEngine {
     }
 
     static void BringTaskbarToForeground() {
-        HWND taskbar = FindWindow(L"Shell_TrayWnd", nullptr);
+        BringToForeground(FindWindow(L"Shell_TrayWnd", nullptr));
+    }
+
+   public:
+    static void BringToForeground(HWND taskbar) {
         if (!taskbar) {
             return;
         }
@@ -789,6 +1016,8 @@ class VirtualDesktopEngine {
         AttachThreadInput(taskbarThread, currentThread, FALSE);
     }
 
+   private:
+
     static std::wstring ReadDesktopName(IVirtualDesktop* desktop) {
         HSTRING name = nullptr;
         if (FAILED(desktop->GetName(&name)) || !name) {
@@ -804,6 +1033,9 @@ class VirtualDesktopEngine {
 
     IServiceProvider* m_serviceProvider = nullptr;
     IVirtualDesktopManagerInternal* m_manager = nullptr;
+    IApplicationViewCollection* m_viewCollection = nullptr;
+    IVirtualDesktopNotificationService* m_notificationService = nullptr;
+    DWORD m_notificationCookie = 0;
     const VersionIIDs* m_version = nullptr;
 };
 
@@ -821,11 +1053,17 @@ static std::atomic<bool> g_reconnectRequested;
 // Everything that changes desktops goes through one queue, drained by the
 // worker thread that owns the COM pointers -- chip clicks from the UI thread
 // and keybinds from the hook thread alike.
-enum class DesktopActionType { SwitchToIndex, Create, RemoveCurrent };
+enum class DesktopActionType {
+    SwitchToIndex,
+    Create,
+    RemoveCurrent,
+    MoveWindowToIndex,
+};
 
 struct DesktopAction {
     DesktopActionType type;
-    int index;  // SwitchToIndex, zero-based
+    int index;            // SwitchToIndex, MoveWindowToIndex; zero-based
+    HWND hwnd = nullptr;  // MoveWindowToIndex: captured at the keypress
 };
 
 static std::mutex g_stateMutex;
@@ -984,36 +1222,48 @@ static Media::SolidColorBrush MakeBrush(uint8_t a,
 }
 
 // The active desktop is marked by colouring its number, so the accent has to be
-// legible on the dark taskbar -- the raw accent often isn't.
-// AccentTextFillColorPrimaryBrush is the brush Windows itself uses for accent
-// text and already follows the theme; UISettings' AccentLight2 is the fallback
-// for when the taskbar's resource dictionary doesn't carry it.
-static Media::Brush AccentTextBrush() {
-    try {
-        if (auto app = Application::Current()) {
-            auto key = winrt::box_value(winrt::hstring(
-                L"AccentTextFillColorPrimaryBrush"));
-            auto resources = app.Resources();
-            if (resources && resources.HasKey(key)) {
-                if (auto brush = resources.Lookup(key).try_as<Media::Brush>()) {
-                    return brush;
-                }
-            }
-        }
-    } catch (...) {
-        VDPLOG(L"AccentTextFillColorPrimaryBrush lookup failed %08X",
-               winrt::to_hresult());
+// legible on the taskbar -- the raw accent often isn't. AccentPalette is the
+// shade ramp Windows derives from the accent chosen in Settings, eight RGBA
+// entries lightest first: Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3.
+// Light2 reads well on a dark taskbar and Dark1 on a light one -- the same
+// picks the widgets mod makes. Read live rather than through the XAML
+// AccentTextFillColorPrimaryBrush resource, which in the taskbar's island
+// doesn't reliably track the accent chosen in Settings.
+static bool TaskbarUsesLightTheme() {
+    DWORD value = 0;
+    DWORD size = sizeof(value);
+    return RegGetValue(
+               HKEY_CURRENT_USER,
+               L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+               L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &value,
+               &size) == ERROR_SUCCESS &&
+           value != 0;
+}
+
+static winrt::Windows::UI::Color AccentTextColor() {
+    const bool light = TaskbarUsesLightTheme();
+
+    BYTE palette[32];
+    DWORD size = sizeof(palette);
+    if (RegGetValue(HKEY_CURRENT_USER,
+                    L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
+                    L"AccentPalette", RRF_RT_REG_BINARY, nullptr, palette,
+                    &size) == ERROR_SUCCESS &&
+        size >= 28) {
+        const BYTE* c = palette + (light ? 4 : 1) * 4;
+        return winrt::Windows::UI::Color{0xFF, c[0], c[1], c[2]};
     }
 
     try {
         winrt::Windows::UI::ViewManagement::UISettings uiSettings;
-        return Media::SolidColorBrush(uiSettings.GetColorValue(
-            winrt::Windows::UI::ViewManagement::UIColorType::AccentLight2));
+        return uiSettings.GetColorValue(
+            light ? winrt::Windows::UI::ViewManagement::UIColorType::AccentDark1
+                  : winrt::Windows::UI::ViewManagement::UIColorType::AccentLight2);
     } catch (...) {
         VDPLOG(L"UISettings accent failed %08X", winrt::to_hresult());
     }
 
-    return MakeBrush(0xFF, 0xFF, 0xFF, 0xFF);
+    return winrt::Windows::UI::Color{0xFF, 0xFF, 0xFF, 0xFF};
 }
 
 static std::wstring DesktopDisplayName(const DesktopSnapshot& snapshot,
@@ -1245,15 +1495,7 @@ static const winrt::Windows::UI::Color kInactiveLabelColor{0xB3, 0xFF, 0xFF,
                                                           0xFF};
 static const auto kLabelFadeDuration = std::chrono::milliseconds(100);
 
-static winrt::Windows::UI::Color AccentTextColor() {
-    if (auto brush = AccentTextBrush().try_as<Media::SolidColorBrush>()) {
-        return brush.Color();
-    }
-    return winrt::Windows::UI::Color{0xFF, 0xFF, 0xFF, 0xFF};
-}
-
-// Each label owns its brush, so its colour can be animated without touching
-// the shared theme resource the accent was read from.
+// Each label owns its brush, so its colour can be animated in place.
 static void SetLabelColor(Controls::TextBlock label,
                           winrt::Windows::UI::Color color,
                           bool animate) {
@@ -1601,6 +1843,89 @@ static void PublishHandoff() {
 }
 
 // Runs on the taskbar UI thread.
+// The active chip keeps whatever colour it was given until its state changes,
+// so an accent change has to be pushed to it. Forgetting each label's state
+// makes the next update treat every chip as new and give it its colour afresh.
+static void RecolorPagers() {
+    std::vector<PagerInstance> pagers;
+    {
+        std::lock_guard<std::mutex> guard(g_pagersMutex);
+        pagers = g_pagers;
+    }
+
+    for (const auto& pager : pagers) {
+        if (!pager.dispatcher) {
+            continue;
+        }
+
+        try {
+            pager.dispatcher.TryRunAsync(
+                winrt::Windows::UI::Core::CoreDispatcherPriority::Normal,
+                [pager]() {
+                    try {
+                        auto items = pager.items.get();
+                        if (!items || g_unloading) {
+                            return;
+                        }
+                        for (auto child : items.Children()) {
+                            auto chip = child.try_as<Controls::Button>();
+                            if (auto label =
+                                    chip ? chip.Content()
+                                               .try_as<Controls::TextBlock>()
+                                         : nullptr) {
+                                label.Tag(nullptr);
+                            }
+                        }
+                        UpdatePagerUI(pager, GetDesktopSnapshot());
+                    } catch (...) {
+                        VDPLOG(L"Recolor error %08X", winrt::to_hresult());
+                    }
+                });
+        } catch (...) {
+            VDPLOG(L"Dispatch error %08X", winrt::to_hresult());
+        }
+    }
+}
+
+// Subscribed from the taskbar UI thread the first time a pager is built, where
+// WinRT is known to be up. ColorValuesChanged covers both a new accent and a
+// light/dark switch, and arrives on a background thread.
+static winrt::Windows::UI::ViewManagement::UISettings g_uiSettings{nullptr};
+static winrt::event_token g_colorValuesChangedToken{};
+
+static void WatchAccentColor() {
+    if (g_uiSettings) {
+        return;
+    }
+
+    try {
+        g_uiSettings = winrt::Windows::UI::ViewManagement::UISettings();
+        g_colorValuesChangedToken =
+            g_uiSettings.ColorValuesChanged([](auto&&, auto&&) {
+                if (!g_unloading) {
+                    VDPLOG(L"Accent colour changed");
+                    RecolorPagers();
+                }
+            });
+    } catch (...) {
+        VDPLOG(L"ColorValuesChanged subscribe failed %08X",
+               winrt::to_hresult());
+        g_uiSettings = nullptr;
+    }
+}
+
+static void StopWatchingAccentColor() {
+    if (!g_uiSettings) {
+        return;
+    }
+
+    try {
+        g_uiSettings.ColorValuesChanged(g_colorValuesChangedToken);
+    } catch (...) {
+    }
+    g_uiSettings = nullptr;
+}
+
 static void EnsurePagerForXamlRoot(XamlRoot xamlRoot) {
     if (g_unloading || !xamlRoot) {
         VDPLOG(L"  no xaml root");
@@ -1731,6 +2056,7 @@ static void EnsurePagerForXamlRoot(XamlRoot xamlRoot) {
     VDPLOG(L"Pager added to a taskbar (%d total)",
            static_cast<int>(g_pagers.size()));
 
+    WatchAccentColor();
     UpdatePagerUI(pager, GetDesktopSnapshot());
     PublishHandoff();
 }
@@ -1961,30 +2287,6 @@ static void OnSnapshotChanged(const DesktopSnapshot& snapshot) {
 // Window list for the hover card
 // =============================================================================
 
-// {AA509086-5CA9-4C25-8F95-589D3C07B48A}
-static const CLSID CLSID_VirtualDesktopManagerPublic = {
-    0xAA509086,
-    0x5CA9,
-    0x4C25,
-    {0x8F, 0x95, 0x58, 0x9D, 0x3C, 0x07, 0xB4, 0x8A}};
-
-// {A5CD92FF-29BE-454C-8D04-D82879FB3F1B}
-static const IID IID_IVirtualDesktopManagerPublic = {
-    0xA5CD92FF,
-    0x29BE,
-    0x454C,
-    {0x8D, 0x04, 0xD8, 0x28, 0x79, 0xFB, 0x3F, 0x1B}};
-
-// The documented interface -- unlike the internal one above, this is a stable
-// public API, which is why the hover card's window lookup carries no version
-// risk at all.
-struct IVirtualDesktopManagerPublic : public IUnknown {
-    virtual HRESULT STDMETHODCALLTYPE IsWindowOnCurrentVirtualDesktop(HWND,
-                                                                      BOOL*) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetWindowDesktopId(HWND, GUID*) = 0;
-    virtual HRESULT STDMETHODCALLTYPE MoveWindowToDesktop(HWND, REFGUID) = 0;
-};
-
 struct WindowScan {
     IVirtualDesktopManagerPublic* manager;
     GUID desktopId;
@@ -2105,6 +2407,37 @@ static void PublishOptimisticSwitch(const DesktopAction& action,
     OnSnapshotChanged(*lastSnapshot);
 }
 
+static const DWORD kNotifiedPollIntervalMs = 5000;
+
+static void WakeWorkerForDesktopChange() {
+    if (HANDLE event = g_workerWakeEvent) {
+        SetEvent(event);
+    }
+}
+
+// A moved window leaves focus on something now invisible. Hand it to the next
+// window down the z-order that's on this desktop, or to the desktop itself,
+// the way closing a window would.
+static void FocusNextWindow(HWND moved,
+                            IVirtualDesktopManagerPublic* publicManager) {
+    HWND next = moved;
+    while ((next = GetWindow(next, GW_HWNDNEXT)) != nullptr) {
+        if (!IsAltTabWindow(next) || IsIconic(next)) {
+            continue;
+        }
+        BOOL onCurrent = FALSE;
+        if (publicManager &&
+            SUCCEEDED(publicManager->IsWindowOnCurrentVirtualDesktop(
+                next, &onCurrent)) &&
+            onCurrent) {
+            VirtualDesktopEngine::BringToForeground(next);
+            return;
+        }
+    }
+
+    VirtualDesktopEngine::BringToForeground(GetShellWindow());
+}
+
 static void WorkerThreadProc() {
     HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hrInit)) {
@@ -2194,6 +2527,12 @@ static void WorkerThreadProc() {
                 case DesktopActionType::RemoveCurrent:
                     engine.RemoveCurrent();
                     break;
+                case DesktopActionType::MoveWindowToIndex:
+                    if (engine.MoveWindowToIndex(action.hwnd, action.index,
+                                                 publicManager)) {
+                        FocusNextWindow(action.hwnd, publicManager);
+                    }
+                    break;
             }
         }
 
@@ -2247,7 +2586,12 @@ static void WorkerThreadProc() {
             lastSnapshot = std::move(snapshot);
         }
 
-        WaitForSingleObject(g_workerWakeEvent, g_settings.pollIntervalMs);
+        // With notifications the shell wakes this loop on every change, and
+        // the timeout is only a safety net.
+        WaitForSingleObject(g_workerWakeEvent,
+                            engine.HasNotifications()
+                                ? kNotifiedPollIntervalMs
+                                : static_cast<DWORD>(g_settings.pollIntervalMs));
     }
 
     engine.Disconnect();
@@ -2510,8 +2854,73 @@ static bool g_swallowed[256];
 // Any unassigned virtual key works; this is the one PowerToys uses.
 static const WORD kDummyKey = 0xFF;
 
+// Modifier state as the hook itself has seen it. GetAsyncKeyState can't be
+// used here: called from explorer while another process owns the foreground,
+// it reports Win as up, so every bind fell through to Windows unless the
+// desktop or taskbar was focused. Touched only on the key thread.
+static bool g_keyDown[256];
+
 static bool IsKeyDown(int vk) {
-    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    switch (vk) {
+        case VK_SHIFT:
+            return g_keyDown[VK_LSHIFT] || g_keyDown[VK_RSHIFT];
+        case VK_CONTROL:
+            return g_keyDown[VK_LCONTROL] || g_keyDown[VK_RCONTROL];
+        case VK_MENU:
+            return g_keyDown[VK_LMENU] || g_keyDown[VK_RMENU];
+    }
+    return g_keyDown[vk];
+}
+
+// Keyups that happen on another desktop (lock screen, UAC, Ctrl+Alt+Del)
+// never reach the hook -- Win+L would otherwise leave Win stuck down and turn
+// a plain '1' into a desktop switch after unlocking.
+//
+// EVENT_SYSTEM_DESKTOPSWITCH also fires on every *virtual* desktop switch,
+// where Win is usually still held for the next Win+N, so the state is only
+// dropped when input has really left the Default desktop.
+static bool IsInputOnDefaultDesktop() {
+    HDESK desk = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    if (!desk) {
+        return false;  // Winlogon / secure desktop: access denied
+    }
+    WCHAR name[64] = L"";
+    bool isDefault =
+        GetUserObjectInformation(desk, UOI_NAME, name, sizeof(name), nullptr) &&
+        _wcsicmp(name, L"Default") == 0;
+    CloseDesktop(desk);
+    return isDefault;
+}
+
+static bool g_inputLeftDefault;  // key thread only
+
+static void CALLBACK DesktopSwitchProc(HWINEVENTHOOK, DWORD, HWND, LONG, LONG,
+                                       DWORD, DWORD) {
+    bool onDefault = IsInputOnDefaultDesktop();
+    // Clear on the way out and again on the way back, so nothing seen in
+    // between survives either.
+    if (!onDefault || g_inputLeftDefault) {
+        memset(g_keyDown, 0, sizeof(g_keyDown));
+    }
+    g_inputLeftDefault = !onDefault;
+}
+
+// The taskbar and the desktop aren't on any one desktop, so there's nothing to
+// move.
+static bool IsMovableWindow(HWND hwnd) {
+    if (!hwnd) {
+        return false;
+    }
+
+    WCHAR className[32];
+    if (!GetClassName(hwnd, className, ARRAYSIZE(className))) {
+        return false;
+    }
+
+    return _wcsicmp(className, L"Shell_TrayWnd") != 0 &&
+           _wcsicmp(className, L"Shell_SecondaryTrayWnd") != 0 &&
+           _wcsicmp(className, L"Progman") != 0 &&
+           _wcsicmp(className, L"WorkerW") != 0;
 }
 
 // Returns true and fills *action when this keydown is one of ours.
@@ -2519,8 +2928,25 @@ static bool MatchKeybind(DWORD vk, DesktopAction* action) {
     if (!IsKeyDown(VK_LWIN) && !IsKeyDown(VK_RWIN)) {
         return false;
     }
-    // Exactly Win: Win+Shift+1, Ctrl+Win+... and friends stay Windows'.
-    if (IsKeyDown(VK_SHIFT) || IsKeyDown(VK_CONTROL) || IsKeyDown(VK_MENU)) {
+    // Ctrl+Win+... and Alt+Win+... stay Windows'.
+    if (IsKeyDown(VK_CONTROL) || IsKeyDown(VK_MENU)) {
+        return false;
+    }
+
+    if (IsKeyDown(VK_SHIFT)) {
+        if (g_settings.keyMove && vk >= '0' && vk <= '9') {
+            // Always ours, even with nothing movable focused (right after an
+            // animated switch the taskbar holds the foreground): a null hwnd
+            // makes the move a no-op instead of handing the chord to Windows.
+            HWND hwnd = GetForegroundWindow();
+            if (!IsMovableWindow(hwnd)) {
+                hwnd = nullptr;
+            }
+            int index = vk == '0' ? 9 : static_cast<int>(vk - '1');
+            *action = {DesktopActionType::MoveWindowToIndex, index, hwnd};
+            return true;
+        }
+        // Every other Win+Shift combination stays Windows'.
         return false;
     }
 
@@ -2562,13 +2988,19 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int code,
     }
 
     const auto* info = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
-    // Injected input -- including our own dummy key -- is never ours to eat.
-    if (!info || (info->flags & LLKHF_INJECTED) || info->vkCode > 0xFF) {
+    if (!info || info->vkCode > 0xFF) {
         return CallNextHookEx(nullptr, code, wParam, lParam);
     }
 
     DWORD vk = info->vkCode;
     bool isDown = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
+
+    // Track everything, injected included (remappers send modifiers that
+    // way), but never act on injected input -- including our own dummy key.
+    g_keyDown[vk] = isDown;
+    if (info->flags & LLKHF_INJECTED) {
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
 
     if (!isDown) {
         if (g_swallowed[vk]) {
@@ -2593,6 +3025,79 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int code,
     return 1;
 }
 
+// Low-level hooks run newest-first, and one that doesn't call CallNextHookEx
+// ends the chain. VMware installs such a hook when a VM grabs the keyboard, so
+// ours -- installed at explorer startup -- never saw Win+N while a VM had
+// focus. Re-installing puts ours back at the head of the chain: on every
+// foreground change, and on a short timer while an input-grabbing app is in
+// front, since the VM can grab after it already has the foreground.
+static HHOOK g_keyHook;          // key thread only
+static HMODULE g_keyHookModule;  // key thread only
+static UINT_PTR g_rehookTimer;   // key thread only
+static const UINT kRehookIntervalMs = 250;
+
+static void InstallKeyHook() {
+    HHOOK hook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc,
+                                  g_keyHookModule, 0);
+    if (!hook) {
+        VDPLOG(L"SetWindowsHookEx failed: %u", GetLastError());
+        return;
+    }
+    // New one first, then drop the old, so no key slips through a gap.
+    if (g_keyHook) {
+        UnhookWindowsHookEx(g_keyHook);
+    }
+    g_keyHook = hook;
+}
+
+static bool IsInputGrabbingApp(HWND hwnd) {
+    DWORD processId = 0;
+    if (!hwnd || !GetWindowThreadProcessId(hwnd, &processId)) {
+        return false;
+    }
+    HANDLE process =
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process) {
+        return false;
+    }
+    WCHAR path[MAX_PATH];
+    DWORD size = ARRAYSIZE(path);
+    bool ok = QueryFullProcessImageName(process, 0, path, &size);
+    CloseHandle(process);
+    if (!ok) {
+        return false;
+    }
+
+    PCWSTR leaf = wcsrchr(path, L'\\');
+    leaf = leaf ? leaf + 1 : path;
+    static const wchar_t* const kNames[] = {L"vmware.exe", L"vmplayer.exe",
+                                            L"VirtualBoxVM.exe"};
+    for (PCWSTR name : kNames) {
+        if (_wcsicmp(leaf, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void CALLBACK RehookTimerProc(HWND, UINT, UINT_PTR, DWORD) {
+    InstallKeyHook();
+}
+
+static void CALLBACK ForegroundProc(HWINEVENTHOOK, DWORD, HWND hwnd, LONG,
+                                    LONG, DWORD, DWORD) {
+    InstallKeyHook();
+
+    bool grabbing = IsInputGrabbingApp(hwnd);
+    if (grabbing && !g_rehookTimer) {
+        g_rehookTimer =
+            SetTimer(nullptr, 0, kRehookIntervalMs, RehookTimerProc);
+    } else if (!grabbing && g_rehookTimer) {
+        KillTimer(nullptr, g_rehookTimer);
+        g_rehookTimer = 0;
+    }
+}
+
 static void KeyThreadProc(HANDLE readyEvent) {
     // Make sure the thread has a message queue before anyone can post WM_QUIT
     // to it; a quit posted to a queue-less thread is silently lost.
@@ -2602,25 +3107,43 @@ static void KeyThreadProc(HANDLE readyEvent) {
     SetEvent(readyEvent);
 
     // Our own module, not explorer.exe: the hook procedure lives in this DLL.
-    HMODULE self = nullptr;
     GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                      reinterpret_cast<LPCWSTR>(&LowLevelKeyboardProc), &self);
+                      reinterpret_cast<LPCWSTR>(&LowLevelKeyboardProc),
+                      &g_keyHookModule);
 
-    HHOOK hook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, self, 0);
-    if (!hook) {
-        VDPLOG(L"SetWindowsHookEx failed: %u", GetLastError());
-    } else {
+    InstallKeyHook();
+    if (g_keyHook) {
         VDPLOG(L"Keybind hook installed");
     }
+
+    HWINEVENTHOOK switchHook = SetWinEventHook(
+        EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_DESKTOPSWITCH, nullptr,
+        DesktopSwitchProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+    HWINEVENTHOOK foregroundHook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+        ForegroundProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+    // A VM that already has focus when the mod loads gets no foreground event.
+    ForegroundProc(nullptr, 0, GetForegroundWindow(), 0, 0, 0, 0);
 
     while (GetMessage(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
-    if (hook) {
-        UnhookWindowsHookEx(hook);
+    if (g_rehookTimer) {
+        KillTimer(nullptr, g_rehookTimer);
+        g_rehookTimer = 0;
+    }
+    if (foregroundHook) {
+        UnhookWinEvent(foregroundHook);
+    }
+    if (switchHook) {
+        UnhookWinEvent(switchHook);
+    }
+    if (g_keyHook) {
+        UnhookWindowsHookEx(g_keyHook);
+        g_keyHook = nullptr;
     }
     g_keyThreadId = 0;
 }
@@ -2635,11 +3158,13 @@ static void StopKeybinds() {
     }
     g_keyThread.join();
     memset(g_swallowed, 0, sizeof(g_swallowed));
+    memset(g_keyDown, 0, sizeof(g_keyDown));
 }
 
 static void StartKeybinds() {
     if (g_keyThread.joinable() ||
-        !(g_settings.keySwitch || g_settings.keyNew || g_settings.keyClose)) {
+        !(g_settings.keySwitch || g_settings.keyNew || g_settings.keyClose ||
+          g_settings.keyMove)) {
         return;
     }
 
@@ -2770,6 +3295,7 @@ void Wh_ModBeforeUninit() {
 
     g_unloading = true;
 
+    StopWatchingAccentColor();
     StopKeybinds();
 
     g_workerStop = true;

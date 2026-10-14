@@ -1,8 +1,8 @@
 // ==WindhawkMod==
 // @id              tweaks
 // @name            Tweaks
-// @description     Genie minimize, auto-hide taskbar when maximized, Alt+Tab delay, desktop drag-select, MB/GB file sizes
-// @version         1.0
+// @description     Genie minimize, auto-hide taskbar when maximized, maximized-window margins, Alt+Tab delay, desktop drag-select, MB/GB file sizes
+// @version         1.1
 // @author          ashtonlariccia
 // @include         *
 // @exclude         msedgewebview2.exe
@@ -13,7 +13,7 @@
 // @exclude         ShellHost.exe
 // @exclude         StartMenuExperienceHost.exe
 // @architecture    x86-64
-// @compilerOptions -luser32 -lgdi32 -lcomctl32 -ladvapi32 -ldwmapi -lole32 -loleaut32 -luuid -lpropsys -lversion -lruntimeobject -lcoremessaging
+// @compilerOptions -luser32 -lgdi32 -lcomctl32 -ladvapi32 -ldwmapi -lole32 -loleaut32 -luuid -lpropsys -lversion -lruntimeobject -lcoremessaging -lshcore
 // ==/WindhawkMod==
 
 // Source code is published under The GNU General Public License v3.0.
@@ -36,6 +36,7 @@ Behaviour changes that don't style anything, one switch each.
 |---|---|---|
 | Genie minimize | every app | Windows flow into their taskbar button when minimized, and back out when restored |
 | Auto-hide when maximized | explorer | The taskbar hides only while a window is maximized or overlaps it |
+| Maximized-window margins | explorer | Maximized and snapped windows keep in from the main screen's sides, lining up with the Widgets top bar, and clear of the bar and the screen's bottom |
 | Alt+Tab delay | explorer | A quick Alt+Tab switches without flashing the switcher |
 | Desktop drag-select | explorer | The selection rectangle works with desktop icons hidden, in your accent colour |
 | MB/GB file sizes | every app | Explorer's details view shows large files in MB/GB instead of always KB |
@@ -43,8 +44,8 @@ Behaviour changes that don't style anything, one switch each.
 The mod is injected into every process for the two features that need it; the
 explorer-only ones stay dormant everywhere else.
 
-Settings apply live. The one exception is switching auto-hide, Alt+Tab delay
-or drag-select on or off, which reloads the mod in explorer only. Compiling a
+Settings apply live. The one exception is switching auto-hide, margins,
+Alt+Tab delay or drag-select on or off, which reloads the mod in explorer only. Compiling a
 new build is the slow case: Windhawk then re-injects the mod into every running
 app one at a time, and an app has no genie until its turn comes.
 
@@ -79,6 +80,20 @@ so injecting there would only cost memory.
   $options:
   - intersected: A window is maximized or overlaps the taskbar
   - maximized: A window is maximized
+- maximizedMargins: true
+  $name: "Maximized-window margins"
+  $description: >-
+    Keeps maximized and snapped windows in from the main screen's left and
+    right edges, so they line up with the ends of the Widgets mod's top bar.
+- maximizedMarginDips: 8
+  $name: "Margins: width (DIP)"
+  $description: 8 matches the top bar's distance from the screen's sides.
+- maximizedMarginHeightDips: 8
+  $name: "Margins: height (DIP)"
+  $description: >-
+    The gap kept between maximized windows and the top bar (or the top of the
+    screen when the bar is off), and between them and the bottom of the
+    screen. 0 for none.
 - altTabDelay: true
   $name: "Alt+Tab delay"
 - altTabDelayMs: 150
@@ -107,6 +122,7 @@ so injecting there would only cost memory.
 #include <dwmapi.h>
 #include <math.h>
 #include <propsys.h>
+#include <shellscalingapi.h>
 #include <shellapi.h>
 #include <uiautomation.h>
 
@@ -156,6 +172,7 @@ so injecting there would only cost memory.
 // (switching one reloads the mod in explorer).
 struct {
     bool autoHide;
+    bool margins;
     bool altTabDelay;
     bool dragSelect;
 } g_active;
@@ -419,8 +436,19 @@ int GetTaskbarButtonX(HWND hWndApp, int fallbackX, HMONITOR hMon) {
                         pAutomation->CreateOrCondition(pButtonCond, pListItemCond, &pOrCond);
                     }
 
+                    // Name and bounds come back with the search in one
+                    // cross-process call. Reading them per button instead made
+                    // two more round trips into explorer for every button on
+                    // the taskbar, which is what a keyboard or title-bar
+                    // minimize was waiting on before the genie could start.
+                    IUIAutomationCacheRequest* pCache = nullptr;
+                    if (SUCCEEDED(pAutomation->CreateCacheRequest(&pCache)) && pCache) {
+                        pCache->AddProperty(UIA_NamePropertyId);
+                        pCache->AddProperty(UIA_BoundingRectanglePropertyId);
+                    }
+
                     IUIAutomationElementArray* pArray = nullptr;
-                    if (pOrCond && SUCCEEDED(pTrayElement->FindAll(TreeScope_Descendants, pOrCond, &pArray)) && pArray) {
+                    if (pOrCond && pCache && SUCCEEDED(pTrayElement->FindAllBuildCache(TreeScope_Descendants, pOrCond, pCache, &pArray)) && pArray) {
                         int length = 0;
                         pArray->get_Length(&length);
 
@@ -435,7 +463,7 @@ int GetTaskbarButtonX(HWND hWndApp, int fallbackX, HMONITOR hMon) {
                             IUIAutomationElement* pItem = nullptr;
                             if (SUCCEEDED(pArray->GetElement(i, &pItem)) && pItem) {
                                 BSTR name;
-                                if (SUCCEEDED(pItem->get_CurrentName(&name)) && name) {
+                                if (SUCCEEDED(pItem->get_CachedName(&name)) && name) {
                                     std::wstring uiaNameLower = name;
                                     std::transform(uiaNameLower.begin(), uiaNameLower.end(), uiaNameLower.begin(), ::towlower);
 
@@ -468,7 +496,7 @@ int GetTaskbarButtonX(HWND hWndApp, int fallbackX, HMONITOR hMon) {
 
                                         if (score > bestScore) {
                                             RECT bRect;
-                                            if (SUCCEEDED(pItem->get_CurrentBoundingRectangle(&bRect))) {
+                                            if (SUCCEEDED(pItem->get_CachedBoundingRectangle(&bRect))) {
                                                 if (bRect.right > bRect.left && bRect.left < monRight - 50) {
                                                     bestScore = score;
                                                     targetX = bRect.left + (bRect.right - bRect.left) / 2;
@@ -487,6 +515,7 @@ int GetTaskbarButtonX(HWND hWndApp, int fallbackX, HMONITOR hMon) {
                     if (pButtonCond) pButtonCond->Release();
                     if (pListItemCond) pListItemCond->Release();
                     if (pOrCond) pOrCond->Release();
+                    if (pCache) pCache->Release();
                     pTrayElement->Release();
                 }
             }
@@ -3405,6 +3434,318 @@ void Uninit() {
 }  // namespace dragselect
 
 ////////////////////////////////////////////////////////////////////////////////
+// Maximized-window margins (ours).
+//
+// Keeps maximized and snapped windows in from the primary monitor's sides, so
+// their edges line up with the ends of the Widgets mod's top bar rather than
+// running to the screen's edge, and a gap clear of the bar and the bottom.
+// Windows maximize and snap into the work area, and the shell carves the work
+// area out of the screen by subtracting app bars -- so each edge gets one: an
+// invisible, click-through window as thick as the margin. The top bar is an
+// app bar too, and the shell starts the side strips below it.
+
+namespace margins {
+
+constexpr PCWSTR kClass = L"WhTweaksMarginBar";
+constexpr UINT WM_APP_APPBAR = WM_APP + 1;
+constexpr UINT WM_APP_REFRESH = WM_APP + 2;  // posted to the thread
+constexpr UINT_PTR kTimerSettle = 1;
+constexpr UINT_PTR kTimerRetry = 2;
+// The Widgets mod's top bar, in this same process. The top strip goes right
+// under it.
+constexpr PCWSTR kTopBarClass = L"WhWidgetsTopBar";
+
+struct Side {
+    UINT edge;
+    HWND hwnd = nullptr;
+    bool registered = false;  // the taskbar accepted ABM_NEW
+    RECT rect{};              // where it last settled
+};
+
+// Touched only on the margins thread. Top and bottom first, so the sides
+// settle against where they ended up.
+Side g_sides[4] = {{ABE_TOP}, {ABE_BOTTOM}, {ABE_LEFT}, {ABE_RIGHT}};
+UINT g_taskbarCreated;
+
+std::atomic<int> g_marginDips{8};
+std::atomic<int> g_heightDips{8};
+HINSTANCE g_module;
+HANDLE g_thread;
+DWORD g_threadId;
+
+void LoadSettings() {
+    // 0 when the setting isn't stored yet, as after a recompile adds it; the
+    // feature's own switch is what turns the margins off.
+    int dips = Wh_GetIntSetting(L"maximizedMarginDips");
+    g_marginDips = dips ? std::clamp(dips, 1, 200) : 8;
+    g_heightDips = std::clamp(Wh_GetIntSetting(L"maximizedMarginHeightDips"), 0, 200);
+}
+
+bool IsVertical(const Side& s) {
+    return s.edge == ABE_TOP || s.edge == ABE_BOTTOM;
+}
+
+// The top and bottom strips only exist with a height to keep.
+bool Wanted(const Side& s) {
+    return !IsVertical(s) || g_heightDips > 0;
+}
+
+// Where the top bar is, if it's up on this monitor.
+bool FindTopBar(const RECT& monitor, RECT* bar) {
+    HWND hwnd = FindWindow(kTopBarClass, nullptr);
+    RECT r;
+    if (!hwnd || !GetWindowRect(hwnd, &r) || r.bottom <= r.top || r.top < monitor.top ||
+        r.bottom > monitor.bottom || r.right <= monitor.left || r.left >= monitor.right) {
+        return false;
+    }
+    *bar = r;
+    return true;
+}
+
+// The timers and the shell's broadcasts are handled once, on this window.
+HWND Coordinator() {
+    return g_sides[0].hwnd;
+}
+
+bool Claim(Side& s) {
+    if (!s.registered && s.hwnd) {
+        APPBARDATA abd{sizeof(abd)};
+        abd.hWnd = s.hwnd;
+        abd.uCallbackMessage = WM_APP_APPBAR;
+        s.registered = SHAppBarMessage(ABM_NEW, &abd);
+    }
+    return s.registered;
+}
+
+// Without this the shell keeps the strip reserved, empty, until sign-out.
+void Unclaim(Side& s) {
+    if (s.registered) {
+        APPBARDATA abd{sizeof(abd)};
+        abd.hWnd = s.hwnd;
+        SHAppBarMessage(ABM_REMOVE, &abd);
+        s.registered = false;
+    }
+    s.rect = {};
+}
+
+// With force false it only re-applies when the shell would now put the strip
+// somewhere else, so answering ABN_POSCHANGED can't feed back into another.
+void Settle(Side& s, bool force) {
+    if (!s.registered) {
+        return;
+    }
+    HMONITOR monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfo(monitor, &mi);
+    UINT dpiX = 96, dpiY = 96;
+    GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+    int dips = IsVertical(s) ? g_heightDips : g_marginDips;
+    int thickness = std::max(1L, std::lround(dips * dpiX / 96.0));
+
+    APPBARDATA abd{sizeof(abd)};
+    abd.hWnd = s.hwnd;
+    abd.uEdge = s.edge;
+    abd.rc = mi.rcMonitor;
+    auto fit = [&] {
+        switch (s.edge) {
+            case ABE_TOP: abd.rc.bottom = abd.rc.top + thickness; break;
+            case ABE_BOTTOM: abd.rc.top = abd.rc.bottom - thickness; break;
+            case ABE_LEFT: abd.rc.right = abd.rc.left + thickness; break;
+            default: abd.rc.left = abd.rc.right - thickness; break;
+        }
+    };
+    RECT bar;
+    if (s.edge == ABE_TOP && FindTopBar(mi.rcMonitor, &bar)) {
+        // Asked for outright rather than queried: which of two top app bars
+        // the shell puts at the edge depends on who registered first, and the
+        // gap belongs under the bar, not above it. Clear of the bar, this
+        // doesn't push it either, and the work area still ends at the gap.
+        abd.rc.top = bar.bottom;
+        abd.rc.bottom = bar.bottom + thickness;
+    } else {
+        fit();
+        // The shell trims the strip to clear the other app bars; the
+        // thickness is ours to keep either way.
+        SHAppBarMessage(ABM_QUERYPOS, &abd);
+        fit();
+    }
+    if (!force && EqualRect(&abd.rc, &s.rect)) {
+        return;
+    }
+    SHAppBarMessage(ABM_SETPOS, &abd);
+    s.rect = abd.rc;
+    SetWindowPos(s.hwnd, nullptr, s.rect.left, s.rect.top, s.rect.right - s.rect.left,
+                 s.rect.bottom - s.rect.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+// Before the taskbar exists -- explorer starting up -- ABM_NEW has no one to
+// answer it, so it's retried every second until it takes.
+void Apply() {
+    bool all = true;
+    for (auto& s : g_sides) {
+        if (Wanted(s)) {
+            all = Claim(s) && all;
+        } else if (s.registered) {
+            Unclaim(s);
+            ShowWindow(s.hwnd, SW_HIDE);
+        }
+    }
+    if (!all) {
+        SetTimer(Coordinator(), kTimerRetry, 1000, nullptr);
+    }
+    for (auto& s : g_sides) {
+        Settle(s, true);
+    }
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    bool coordinator = hwnd == Coordinator();
+
+    // A new taskbar knows nothing of the old one's app bars.
+    if (g_taskbarCreated && msg == g_taskbarCreated) {
+        if (coordinator) {
+            for (auto& s : g_sides) {
+                s.registered = false;
+                s.rect = {};
+            }
+            Apply();
+        }
+        return 0;
+    }
+
+    switch (msg) {
+        case WM_APP_APPBAR:
+            if (wParam == ABN_POSCHANGED) {
+                // Settle after the shell is done moving things, not inside
+                // its notification.
+                SetTimer(Coordinator(), kTimerSettle, 100, nullptr);
+            }
+            return 0;
+
+        case WM_DISPLAYCHANGE:
+        case WM_DPICHANGED:
+            // Monitors resized or rescaled: the strips' pixel width follows.
+            SetTimer(Coordinator(), kTimerSettle, 250, nullptr);
+            return 0;
+
+        case WM_TIMER:
+            if (coordinator) {
+                KillTimer(hwnd, wParam);
+                if (wParam == kTimerRetry) {
+                    Apply();
+                } else if (wParam == kTimerSettle) {
+                    for (auto& s : g_sides) {
+                        Settle(s, false);
+                    }
+                }
+            }
+            return 0;
+
+        case WM_WINDOWPOSCHANGED:
+            for (auto& s : g_sides) {
+                if (s.hwnd == hwnd && s.registered) {
+                    APPBARDATA abd{sizeof(abd)};
+                    abd.hWnd = hwnd;
+                    SHAppBarMessage(ABM_WINDOWPOSCHANGED, &abd);
+                }
+            }
+            break;
+
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+DWORD WINAPI ThreadProc(LPVOID param) {
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    WNDCLASSEX wc{sizeof(wc)};
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = g_module;
+    wc.lpszClassName = kClass;
+    RegisterClassEx(&wc);
+    g_taskbarCreated = RegisterWindowMessage(L"TaskbarCreated");
+
+    for (auto& s : g_sides) {
+        // Fully transparent and click-through: the strip only holds space.
+        s.hwnd = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED |
+                                    WS_EX_TRANSPARENT,
+                                kClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+                                g_module, nullptr);
+        if (s.hwnd) {
+            SetLayeredWindowAttributes(s.hwnd, 0, 0, LWA_ALPHA);
+        }
+    }
+
+    // The queue exists now, so Init can stop waiting and post to it.
+    MSG msg;
+    PeekMessage(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    SetEvent(static_cast<HANDLE>(param));
+
+    Apply();
+    while (GetMessage(&msg, nullptr, 0, 0) > 0) {
+        if (!msg.hwnd && msg.message == WM_APP_REFRESH) {
+            Apply();
+            continue;
+        }
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    for (auto& s : g_sides) {
+        if (s.hwnd) {
+            Unclaim(s);
+            DestroyWindow(s.hwnd);
+            s.hwnd = nullptr;
+        }
+    }
+    UnregisterClass(kClass, g_module);
+    return 0;
+}
+
+bool Init() {
+    GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                      reinterpret_cast<LPCWSTR>(&Init), &g_module);
+    LoadSettings();
+
+    HANDLE ready = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!ready) {
+        return false;
+    }
+    g_thread = CreateThread(nullptr, 0, ThreadProc, ready, 0, &g_threadId);
+    if (g_thread) {
+        WaitForSingleObject(ready, 5000);
+    }
+    CloseHandle(ready);
+    return g_thread != nullptr;
+}
+
+// Live, from the settings: the width may have changed.
+void Refresh() {
+    LoadSettings();
+    if (g_threadId) {
+        PostThreadMessage(g_threadId, WM_APP_REFRESH, 0, 0);
+    }
+}
+
+// Joined before the DLL goes away: the window procedure lives in it.
+void Uninit() {
+    if (!g_thread) {
+        return;
+    }
+    PostThreadMessage(g_threadId, WM_QUIT, 0, 0);
+    WaitForSingleObject(g_thread, 5000);
+    CloseHandle(g_thread);
+    g_thread = nullptr;
+    g_threadId = 0;
+}
+
+}  // namespace margins
+
+////////////////////////////////////////////////////////////////////////////////
 // Entry points
 
 bool g_isExplorer;
@@ -3423,6 +3764,7 @@ BOOL WINAPI ShowWindow_Hook(HWND hWnd, int nCmdShow) {
 
 struct ExplorerToggles {
     bool autoHide;
+    bool margins;
     bool altTabDelay;
     bool dragSelect;
 
@@ -3432,6 +3774,7 @@ struct ExplorerToggles {
 ExplorerToggles ReadExplorerToggles() {
     return {
         Wh_GetIntSetting(L"autoHide") != 0,
+        Wh_GetIntSetting(L"maximizedMargins") != 0,
         Wh_GetIntSetting(L"altTabDelay") != 0,
         Wh_GetIntSetting(L"dragSelect") != 0,
     };
@@ -3453,6 +3796,7 @@ BOOL Wh_ModInit() {
     if (g_isExplorer) {
         ExplorerToggles toggles = ReadExplorerToggles();
         g_active.autoHide = toggles.autoHide;
+        g_active.margins = toggles.margins;
         g_active.altTabDelay = toggles.altTabDelay;
         g_active.dragSelect = toggles.dragSelect;
     }
@@ -3462,6 +3806,11 @@ BOOL Wh_ModInit() {
     if (g_active.autoHide && !autohide::Init()) {
         Wh_Log(L"Auto-hide failed to initialize");
         g_active.autoHide = false;
+    }
+
+    if (g_active.margins && !margins::Init()) {
+        Wh_Log(L"Margins failed to initialize");
+        g_active.margins = false;
     }
 
     if (g_active.altTabDelay && !alttab::Init()) {
@@ -3504,6 +3853,10 @@ void Wh_ModUninit() {
         autohide::Uninit();
     }
 
+    if (g_active.margins) {
+        margins::Uninit();
+    }
+
     if (g_active.altTabDelay) {
         alttab::ClearState();
     }
@@ -3524,8 +3877,8 @@ BOOL Wh_ModSettingsChanged(BOOL* bReload) {
     // Switching an explorer feature on or off changes which hooks explorer
     // needs; only then is explorer -- and only explorer -- reloaded.
     ExplorerToggles toggles = ReadExplorerToggles();
-    if (!(toggles == ExplorerToggles{g_active.autoHide, g_active.altTabDelay,
-                                     g_active.dragSelect})) {
+    if (!(toggles == ExplorerToggles{g_active.autoHide, g_active.margins,
+                                     g_active.altTabDelay, g_active.dragSelect})) {
         *bReload = TRUE;
         return TRUE;
     }
@@ -3533,6 +3886,10 @@ BOOL Wh_ModSettingsChanged(BOOL* bReload) {
     if (g_active.autoHide) {
         autohide::LoadSettings();
         autohide::AdjustAllTaskbars();
+    }
+
+    if (g_active.margins) {
+        margins::Refresh();
     }
 
     if (g_active.altTabDelay) {
