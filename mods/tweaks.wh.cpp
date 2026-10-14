@@ -1,10 +1,11 @@
 // ==WindhawkMod==
 // @id              tweaks
 // @name            Tweaks
-// @description     Genie minimize, auto-hide taskbar when maximized, maximized-window margins, Alt+Tab delay, desktop drag-select, MB/GB file sizes
-// @version         1.1
+// @description     Genie minimize, auto-hide taskbar when maximized, maximized-window margins and rounded corners, Alt+Tab delay, desktop drag-select, MB/GB file sizes
+// @version         1.2
 // @author          ashtonlariccia
 // @include         *
+// @include         dwm.exe
 // @exclude         msedgewebview2.exe
 // @exclude         backgroundTaskHost.exe
 // @exclude         LockApp.exe
@@ -36,6 +37,7 @@ Behaviour changes that don't style anything, one switch each.
 |---|---|---|
 | Genie minimize | every app | Windows flow into their taskbar button when minimized, and back out when restored |
 | Auto-hide when maximized | explorer | The taskbar hides only while a window is maximized or overlaps it |
+| Rounded maximized windows | dwm | Maximized and snapped windows keep an ordinary window's rounded corners (experimental) |
 | Maximized-window margins | explorer | Maximized and snapped windows keep in from the main screen's sides, lining up with the Widgets top bar, and clear of the bar and the screen's bottom |
 | Alt+Tab delay | explorer | A quick Alt+Tab switches without flashing the switcher |
 | Desktop drag-select | explorer | The selection rectangle works with desktop icons hidden, in your accent colour |
@@ -51,6 +53,14 @@ app one at a time, and an app has no genie until its turn comes.
 
 The processes excluded above have no minimizable windows and no file views,
 so injecting there would only cost memory.
+
+Rounded maximized windows runs inside dwm.exe, which Windhawk only injects into
+once it is on the process inclusion list in Windhawk's advanced settings -- and
+only for a mod that names it: the `*` above doesn't reach system processes,
+hence the separate include.
+Nothing else in this mod runs there. Switching it reloads the mod in dwm.exe
+only; windows that are already maximized pick it up the next time they are
+maximized, snapped or resized.
 */
 // ==/WindhawkModReadme==
 
@@ -80,6 +90,12 @@ so injecting there would only cost memory.
   $options:
   - intersected: A window is maximized or overlaps the taskbar
   - maximized: A window is maximized
+- maximizedCorners: false
+  $name: "Rounded maximized windows (experimental)"
+  $description: >-
+    Maximized and snapped windows keep an ordinary window's rounded corners.
+    Runs inside dwm.exe, which must be on the process inclusion list in
+    Windhawk's advanced settings.
 - maximizedMargins: true
   $name: "Maximized-window margins"
   $description: >-
@@ -177,7 +193,7 @@ struct {
     bool dragSelect;
 } g_active;
 
-bool IsExplorerProcess() {
+bool IsProcess(PCWSTR exeName) {
     WCHAR path[MAX_PATH];
     DWORD length = GetModuleFileName(nullptr, path, ARRAYSIZE(path));
     if (!length || length == ARRAYSIZE(path)) {
@@ -185,7 +201,11 @@ bool IsExplorerProcess() {
     }
 
     PCWSTR name = wcsrchr(path, L'\\');
-    return name && _wcsicmp(name + 1, L"explorer.exe") == 0;
+    return name && _wcsicmp(name + 1, exeName) == 0;
+}
+
+bool IsExplorerProcess() {
+    return IsProcess(L"explorer.exe");
 }
 
 // ShowWindow is hooked once and shared: Alt+Tab delay needs it in explorer,
@@ -3746,9 +3766,68 @@ void Uninit() {
 }  // namespace margins
 
 ////////////////////////////////////////////////////////////////////////////////
+// Rounded maximized windows (ours). Runs in dwm.exe only.
+//
+// DWM rounds a window by asking CTopLevelWindow::
+// GetFloatCornerRadiusForCurrentStyle for its radius. That function answers 0
+// outright for a maximized or snapped window and otherwise defers to
+// GetRadiusFromCornerStyle, which applies the window's corner preference. So
+// when it answers 0 this asks GetRadiusFromCornerStyle anyway: maximized and
+// snapped windows get an ordinary window's corners, and a window that opted
+// out of rounding (or has no border to round) still gets 0 from it.
+//
+// Found on 26300 (uDWM.dll's symbols); the same pair exists on 22H2 onward.
+// Windhawk only injects into dwm.exe when it's on the process inclusion list
+// in its advanced settings.
+
+namespace corners {
+
+using RadiusFn = float(WINAPI*)(void* window);
+RadiusFn GetFloatCornerRadiusForCurrentStyle_Original;
+RadiusFn GetRadiusFromCornerStyle;
+
+float WINAPI GetFloatCornerRadiusForCurrentStyle_Hook(void* window) {
+    float radius = GetFloatCornerRadiusForCurrentStyle_Original(window);
+    if (radius == 0 && GetRadiusFromCornerStyle) {
+        radius = GetRadiusFromCornerStyle(window);
+    }
+    return radius;
+}
+
+bool Init() {
+    HMODULE udwm = GetModuleHandle(L"udwm.dll");
+    if (!udwm) {
+        Wh_Log(L"udwm.dll isn't loaded");
+        return false;
+    }
+
+    WindhawkUtils::SYMBOL_HOOK hooks[] = {
+        {
+            {LR"(public: float __cdecl CTopLevelWindow::GetFloatCornerRadiusForCurrentStyle(void))"},
+            (void**)&GetFloatCornerRadiusForCurrentStyle_Original,
+            (void*)GetFloatCornerRadiusForCurrentStyle_Hook,
+        },
+        {
+            {LR"(private: float __cdecl CTopLevelWindow::GetRadiusFromCornerStyle(void))"},
+            (void**)&GetRadiusFromCornerStyle,
+        },
+    };
+    bool ok = HookSymbols(udwm, hooks, ARRAYSIZE(hooks));
+    Wh_Log(L"corner hooks %s: radius function %p", ok ? L"installed" : L"failed",
+           GetRadiusFromCornerStyle);
+    return ok;
+}
+
+}  // namespace corners
+
+////////////////////////////////////////////////////////////////////////////////
 // Entry points
 
 bool g_isExplorer;
+// In dwm.exe only the rounded-corners hook runs; the genie, the file-size fix
+// and the ShowWindow hook stay out of it.
+bool g_isDwm;
+bool g_cornersActive;
 
 BOOL WINAPI ShowWindow_Hook(HWND hWnd, int nCmdShow) {
     if (g_active.altTabDelay) {
@@ -3792,6 +3871,16 @@ BOOL Wh_ModInit() {
     Wh_Log(L">");
 
     g_isExplorer = IsExplorerProcess();
+    g_isDwm = IsProcess(L"dwm.exe");
+
+    if (g_isDwm) {
+        g_cornersActive = Wh_GetIntSetting(L"maximizedCorners") != 0;
+        if (g_cornersActive && !corners::Init()) {
+            Wh_Log(L"Rounded maximized windows failed to initialize");
+            g_cornersActive = false;
+        }
+        return TRUE;
+    }
 
     if (g_isExplorer) {
         ExplorerToggles toggles = ReadExplorerToggles();
@@ -3867,6 +3956,15 @@ void Wh_ModUninit() {
 }
 
 BOOL Wh_ModSettingsChanged(BOOL* bReload) {
+    if (g_isDwm) {
+        // Hooks are only installed while the feature is on, so switching it
+        // either way reloads the mod -- in dwm.exe only.
+        if ((Wh_GetIntSetting(L"maximizedCorners") != 0) != g_cornersActive) {
+            *bReload = TRUE;
+        }
+        return TRUE;
+    }
+
     genie::LoadSettings();
     filesizes::LoadSettings();
 
